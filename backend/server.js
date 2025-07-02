@@ -1,0 +1,138 @@
+// backend/server.js
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// Middleware
+app.use(cors());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Create uploads directory if it doesn't exist
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Multer configuration for PDF uploads
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, 'uploads/');
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, file.fieldname + '-' + uniqueSuffix + '.pdf');
+    }
+});
+
+const upload = multer({
+    storage: storage,
+    limits: {
+        fileSize: 100 * 1024 * 1024, // 100MB limit
+    },
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype === 'application/pdf') {
+            cb(null, true);
+        } else {
+            cb(new Error('Only PDF files are allowed'));
+        }
+    }
+});
+
+// Routes
+app.get('/', (req, res) => {
+    res.json({ message: 'Forest PDF Viewer API is running! 🌲' });
+});
+
+// PDF Upload endpoint
+app.post('/api/upload', upload.single('pdf'), (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No PDF file uploaded' });
+        }
+
+        const fileInfo = {
+            filename: req.file.filename,
+            originalName: req.file.originalname,
+            size: req.file.size,
+            path: req.file.path,
+            uploadTime: new Date().toISOString()
+        };
+
+        res.json({
+            success: true,
+            message: 'PDF uploaded successfully',
+            file: fileInfo
+        });
+    } catch (error) {
+        console.error('Upload error:', error);
+        res.status(500).json({ error: 'Failed to upload PDF' });
+    }
+});
+
+// Serve uploaded PDF files
+app.get('/api/files/:filename', (req, res) => {
+    try {
+        const filename = req.params.filename;
+        const filePath = path.join(__dirname, 'uploads', filename);
+        
+        // Check if file exists
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ error: 'File not found' });
+        }
+        
+        // Set proper headers for PDF
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+        
+        // Stream the file
+        const fileStream = fs.createReadStream(filePath);
+        fileStream.pipe(res);
+        
+    } catch (error) {
+        console.error('File serving error:', error);
+        res.status(500).json({ error: 'Failed to serve file' });
+    }
+});
+
+// Gemini API routes
+const geminiRoutes = require('./routes/gemini');
+app.use('/api/gemini', geminiRoutes);
+
+// PDF processing routes
+const pdfRoutes = require('./routes/pdf');
+app.use('/api/pdf', pdfRoutes);
+
+// Quiz generation routes
+const quizRoutes = require('./routes/quiz');
+app.use('/api/quiz', quizRoutes);
+
+// Error handling middleware
+app.use((error, req, res, next) => {
+    if (error instanceof multer.MulterError) {
+        if (error.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400).json({ error: 'File too large. Maximum size is 100MB.' });
+        }
+    }
+    
+    console.error('Server error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+    res.status(404).json({ error: 'Route not found' });
+});
+
+app.listen(PORT, () => {
+    console.log(`🌲 Forest PDF Viewer server running on port ${PORT}`);
+    console.log(`📚 Ready to process PDFs and generate insights!`);
+});
+
+module.exports = app;

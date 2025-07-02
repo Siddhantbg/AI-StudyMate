@@ -1,0 +1,70 @@
+# === OS Files ===
+.DS_Store
+Thumbs.db
+
+# === Node.js ===
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.egg-info/
+.env
+.venv/
+venv/
+
+# === Java ===
+*.class
+*.jar
+*.war
+*.ear
+target/
+*.log
+
+# === VSCode & IDEs ===
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# === Environment Files ===
+.env
+.env.*
+
+# === Logs ===
+*.log
+
+# === Build directories ===
+dist/
+build/
+out/
+
+# === Coverage ===
+coverage/
+*.lcov
+*.nyc_output
+
+# === Misc ===
+*.swp
+*.bak
+*.tmp
+*.temp
+*.orig
+
+# === macOS ===
+.AppleDouble
+.LSOverride
+
+# === Windows ===
+Desktop.ini
+$RECYCLE.BIN/
+
+# === Linux ===
+*~
