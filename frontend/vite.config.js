@@ -1,22 +1,23 @@
+// vite.config.js - Simplified, no worker conflicts
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  
+  // Basic optimizations
   optimizeDeps: {
-    include: ['pdfjs-dist']
+    include: ['react-pdf', 'pdfjs-dist']
   },
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          'pdfjs': ['pdfjs-dist']
-        }
-      }
-    }
+  
+  // Simple server config
+  server: {
+    host: true,
+    port: 5173
   },
-  worker: {
-    format: 'es'
+  
+  // Define global for compatibility
+  define: {
+    global: 'globalThis'
   }
 })

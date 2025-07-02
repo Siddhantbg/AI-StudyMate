@@ -3,6 +3,8 @@ import { Upload, FileText, Brain, HelpCircle, Focus, TreePine } from 'lucide-rea
 import PDFViewer from './components/PDFViewer';
 import Sidebar from './components/Sidebar';
 import FocusMode from './components/FocusMode';
+import FileManager from './components/FileManager';
+import { saveFile } from './utils/fileStorage';
 import './styles/forest-theme.css';
 import './styles/pdf-setup.css';
 
@@ -79,6 +81,16 @@ const handleFileUpload = async (file) => {
       setPdfFile(file); // Use original file object for react-pdf
       setUploadedFileName(result.file.filename);
       setCurrentPage(1);
+      
+      // Save file to IndexedDB for future access
+      try {
+        await saveFile(file, result.file.filename);
+        console.log('File saved to local storage for future access');
+      } catch (storageError) {
+        console.warn('Failed to save file to local storage:', storageError);
+        // Don't fail the upload if storage fails
+      }
+      
       console.log('File set for PDF viewer:', file);
     } else {
       throw new Error(result.error || 'Upload failed');
@@ -88,6 +100,20 @@ const handleFileUpload = async (file) => {
     alert('Failed to upload PDF: ' + error.message);
   } finally {
     setIsUploading(false);
+  }
+};
+
+// Handle loading a previously saved file
+const handleFileLoad = (file, uploadedFileName, metadata) => {
+  try {
+    setPdfFile(file);
+    setUploadedFileName(uploadedFileName);
+    setCurrentPage(1);
+    setTotalPages(0);
+    console.log('Loaded saved file:', metadata.fileName);
+  } catch (error) {
+    console.error('Error loading saved file:', error);
+    alert('Error loading file: ' + error.message);
   }
 };
 
@@ -140,12 +166,15 @@ const handleFileUpload = async (file) => {
       {/* Main Content */}
       <div className="main-content">
         {!pdfFile ? (
-          /* Upload Area */
-          <div
-            className="upload-area"
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-          >
+          /* Upload Section with File Manager */
+          <div className="upload-section">
+            <FileManager onFileLoad={handleFileLoad} />
+            
+            <div
+              className="upload-area"
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+            >
             <div className="upload-content">
               <div className="upload-icon-container">
                 <Upload size={64} className="upload-icon" />
@@ -172,6 +201,7 @@ const handleFileUpload = async (file) => {
                 {isUploading ? 'Uploading...' : 'Choose PDF File'}
               </label>
             </div>
+          </div>
           </div>
         ) : (
           /* PDF Viewer Layout */

@@ -101,6 +101,57 @@ app.get('/api/files/:filename', (req, res) => {
     }
 });
 
+// List uploaded files endpoint
+app.get('/api/files', (req, res) => {
+    try {
+        const uploadsDir = path.join(__dirname, 'uploads');
+        
+        // Check if uploads directory exists
+        if (!fs.existsSync(uploadsDir)) {
+            return res.json({ files: [] });
+        }
+        
+        // Read all files in uploads directory
+        const files = fs.readdirSync(uploadsDir);
+        
+        // Filter for PDF files and get file stats
+        const pdfFiles = files
+            .filter(file => file.toLowerCase().endsWith('.pdf'))
+            .map(filename => {
+                const filePath = path.join(uploadsDir, filename);
+                const stats = fs.statSync(filePath);
+                
+                // Extract original filename if it follows the pattern: fieldname-timestamp-random.pdf
+                let originalName = filename;
+                if (filename.startsWith('pdf-') && filename.includes('-')) {
+                    // Try to extract original name from upload pattern
+                    originalName = filename; // Keep as is, or you could implement original name extraction
+                }
+                
+                return {
+                    id: filename, // Use filename as ID for server files
+                    fileName: originalName,
+                    uploadedFileName: filename,
+                    fileSize: stats.size,
+                    fileType: 'application/pdf',
+                    uploadDate: stats.mtime.toISOString(),
+                    source: 'server' // Mark as server-stored file
+                };
+            })
+            .sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate)); // Sort by newest first
+        
+        res.json({ 
+            success: true, 
+            files: pdfFiles,
+            count: pdfFiles.length 
+        });
+        
+    } catch (error) {
+        console.error('Error listing files:', error);
+        res.status(500).json({ error: 'Failed to list uploaded files' });
+    }
+});
+
 // Gemini API routes
 const geminiRoutes = require('./routes/gemini');
 app.use('/api/gemini', geminiRoutes);

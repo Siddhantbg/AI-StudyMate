@@ -21,12 +21,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 3rem;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border: 2px dashed #6c757d;
-  margin: 2rem;
+  padding: 2rem;
+  color: #4a7c59;
 }
 
 .loading-spinner {
@@ -50,18 +46,12 @@
   font-size: 14px;
 }
 
-/* Enhanced PDF Error States */
 .pdf-error {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 3rem;
-  background: #f8d7da;
-  border: 2px solid #dc3545;
-  border-radius: 8px;
-  margin: 2rem;
-  text-align: center;
+  padding: 2rem;
+  color: #dc2626;
 }
 
 .pdf-error p {

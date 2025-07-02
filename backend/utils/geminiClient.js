@@ -1,4 +1,4 @@
-// backend/utils/geminiClient.js
+// backend/utils/geminiClient.js - ENHANCED with retry logic and error handling
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 class GeminiClient {
@@ -8,15 +8,92 @@ class GeminiClient {
         }
         
         this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        this.model = this.genAI.getGenerativeModel({ model: "gemini-pro" });
+        
+        // Try multiple models as fallbacks
+        this.models = [
+            "gemini-1.5-flash",
+            "gemini-1.5-pro", 
+            "gemini-1.0-pro"
+        ];
+        
+        this.currentModelIndex = 0;
+        this.model = this.genAI.getGenerativeModel({ 
+            model: this.models[this.currentModelIndex] 
+        });
+        
+        console.log(`✅ Gemini client initialized with model: ${this.models[this.currentModelIndex]}`);
+    }
+
+    // Retry logic with exponential backoff
+    async retryWithBackoff(operation, maxRetries = 3) {
+        let lastError;
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                return await operation();
+            } catch (error) {
+                lastError = error;
+                console.log(`❌ Attempt ${attempt} failed:`, error.message);
+                
+                // Handle specific error types
+                if (error.status === 503) {
+                    // Service overloaded - wait and retry
+                    const waitTime = Math.pow(2, attempt) * 1000; // Exponential backoff
+                    console.log(`⏳ Service overloaded, waiting ${waitTime}ms before retry ${attempt}/${maxRetries}`);
+                    await this.sleep(waitTime);
+                    continue;
+                } else if (error.status === 404 && this.currentModelIndex < this.models.length - 1) {
+                    // Model not found - try next model
+                    this.currentModelIndex++;
+                    console.log(`🔄 Switching to model: ${this.models[this.currentModelIndex]}`);
+                    this.model = this.genAI.getGenerativeModel({ 
+                        model: this.models[this.currentModelIndex] 
+                    });
+                    continue;
+                } else if (error.status === 429) {
+                    // Rate limited - wait longer
+                    const waitTime = Math.pow(3, attempt) * 1000;
+                    console.log(`⏳ Rate limited, waiting ${waitTime}ms before retry ${attempt}/${maxRetries}`);
+                    await this.sleep(waitTime);
+                    continue;
+                } else {
+                    // Other errors - don't retry
+                    break;
+                }
+            }
+        }
+        
+        throw lastError;
+    }
+
+    // Sleep utility
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // Enhanced error handling
+    handleGeminiError(error, operation) {
+        console.error(`Gemini ${operation} error:`, error);
+        
+        if (error.status === 503) {
+            return new Error(`Gemini service is temporarily overloaded. Please try again in a few moments.`);
+        } else if (error.status === 429) {
+            return new Error(`Too many requests. Please wait a moment before trying again.`);
+        } else if (error.status === 400) {
+            return new Error(`Invalid request. Please check your input and try again.`);
+        } else if (error.status === 404) {
+            return new Error(`Gemini model not available. Please try again later.`);
+        } else {
+            return new Error(`Failed to generate ${operation}. Please try again.`);
+        }
     }
 
     async summarizePage(text, pageNumber = null) {
-        try {
+        const operation = async () => {
             const prompt = `
                 Please provide a comprehensive summary of the following text from a PDF document${pageNumber ? ` (Page ${pageNumber})` : ''}:
                 
-                Text: "${text}"
+                Text: "${text.substring(0, 8000)}" ${text.length > 8000 ? '...(truncated)' : ''}
                 
                 Please structure your summary with:
                 1. Main topic/theme
@@ -30,19 +107,24 @@ class GeminiClient {
             const result = await this.model.generateContent(prompt);
             const response = await result.response;
             return response.text();
+        };
+
+        try {
+            return await this.retryWithBackoff(operation);
         } catch (error) {
-            console.error('Gemini summarization error:', error);
-            throw new Error('Failed to generate summary');
+            throw this.handleGeminiError(error, 'summary');
         }
     }
 
     async summarizePageRange(textsArray, fromPage, toPage) {
-        try {
+        const operation = async () => {
             const combinedText = textsArray.join('\n\n');
+            const truncatedText = combinedText.substring(0, 10000);
+            
             const prompt = `
                 Please provide a comprehensive summary of the following text from pages ${fromPage} to ${toPage} of a PDF document:
                 
-                Text: "${combinedText}"
+                Text: "${truncatedText}" ${combinedText.length > 10000 ? '...(truncated)' : ''}
                 
                 Please structure your summary with:
                 1. Overall theme across these pages
@@ -57,18 +139,22 @@ class GeminiClient {
             const result = await this.model.generateContent(prompt);
             const response = await result.response;
             return response.text();
+        };
+
+        try {
+            return await this.retryWithBackoff(operation);
         } catch (error) {
-            console.error('Gemini page range summarization error:', error);
-            throw new Error('Failed to generate page range summary');
+            throw this.handleGeminiError(error, 'page range summary');
         }
     }
 
     async explainText(text, context = '') {
-        try {
+        const operation = async () => {
+            const truncatedText = text.substring(0, 5000);
             const prompt = `
                 Please provide a detailed explanation of the following text:
                 
-                Text to explain: "${text}"
+                Text to explain: "${truncatedText}" ${text.length > 5000 ? '...(truncated)' : ''}
                 ${context ? `Context: "${context}"` : ''}
                 
                 Please provide:
@@ -84,31 +170,33 @@ class GeminiClient {
             const result = await this.model.generateContent(prompt);
             const response = await result.response;
             return response.text();
+        };
+
+        try {
+            return await this.retryWithBackoff(operation);
         } catch (error) {
-            console.error('Gemini explanation error:', error);
-            throw new Error('Failed to generate explanation');
+            throw this.handleGeminiError(error, 'explanation');
         }
     }
 
     async generateQuiz(text, pages, questionCount = 5) {
-        try {
+        // Reduce question count if service is overloaded
+        const adjustedQuestionCount = Math.min(questionCount, 5);
+        
+        const operation = async () => {
+            const truncatedText = text.substring(0, 8000);
             const prompt = `
-                Based on the following content from pages ${pages} of a PDF document, generate ${questionCount} quiz questions:
+                Based on the following content from pages ${pages} of a PDF document, generate ${adjustedQuestionCount} quiz questions:
                 
-                Content: "${text}"
+                Content: "${truncatedText}" ${text.length > 8000 ? '...(truncated)' : ''}
                 
-                Please create a mix of question types:
-                - Multiple choice questions (with 4 options each)
-                - True/False questions
-                - Short answer questions
-                
-                Format your response as a JSON object with this structure:
+                Please create a mix of question types and format as valid JSON:
                 {
                     "quiz": [
                         {
                             "type": "multiple_choice",
                             "question": "Question text",
-                            "options": ["A", "B", "C", "D"],
+                            "options": ["Option A", "Option B", "Option C", "Option D"],
                             "correct_answer": 0,
                             "explanation": "Why this answer is correct"
                         },
@@ -117,48 +205,51 @@ class GeminiClient {
                             "question": "Statement to evaluate",
                             "correct_answer": true,
                             "explanation": "Explanation of the answer"
-                        },
-                        {
-                            "type": "short_answer",
-                            "question": "Question requiring brief response",
-                            "sample_answer": "Example of good answer",
-                            "key_points": ["point1", "point2"]
                         }
                     ]
                 }
                 
-                Make sure questions test understanding, not just memorization.
+                Important: Return ONLY valid JSON, no additional text.
             `;
 
             const result = await this.model.generateContent(prompt);
             const response = await result.response;
+            const responseText = response.text();
             
-            // Try to parse as JSON, fallback to text if parsing fails
+            // Try to parse as JSON, fallback to structured text
             try {
-                const jsonResponse = JSON.parse(response.text());
+                // Clean the response text
+                const cleanJson = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+                const jsonResponse = JSON.parse(cleanJson);
                 return jsonResponse;
             } catch (parseError) {
-                // If JSON parsing fails, return a structured response
+                console.log('JSON parsing failed, returning structured text response');
                 return {
                     quiz: [{
                         type: "text_response",
-                        content: response.text(),
-                        note: "Quiz generated in text format due to parsing constraints"
+                        content: responseText,
+                        note: "Quiz generated in text format due to JSON parsing constraints",
+                        pages: pages,
+                        questionCount: adjustedQuestionCount
                     }]
                 };
             }
+        };
+
+        try {
+            return await this.retryWithBackoff(operation, 2); // Reduced retries for quiz
         } catch (error) {
-            console.error('Gemini quiz generation error:', error);
-            throw new Error('Failed to generate quiz');
+            throw this.handleGeminiError(error, 'quiz');
         }
     }
 
     async generateStudyTips(text, subject = '') {
-        try {
+        const operation = async () => {
+            const truncatedText = text.substring(0, 6000);
             const prompt = `
                 Based on this content${subject ? ` about ${subject}` : ''}, provide study tips and learning strategies:
                 
-                Content: "${text}"
+                Content: "${truncatedText}" ${text.length > 6000 ? '...(truncated)' : ''}
                 
                 Please provide:
                 1. Key concepts to focus on
@@ -173,9 +264,24 @@ class GeminiClient {
             const result = await this.model.generateContent(prompt);
             const response = await result.response;
             return response.text();
+        };
+
+        try {
+            return await this.retryWithBackoff(operation);
         } catch (error) {
-            console.error('Gemini study tips error:', error);
-            throw new Error('Failed to generate study tips');
+            throw this.handleGeminiError(error, 'study tips');
+        }
+    }
+
+    // Method to check service status
+    async checkServiceHealth() {
+        try {
+            const result = await this.model.generateContent("Hello");
+            console.log('✅ Gemini service is healthy');
+            return true;
+        } catch (error) {
+            console.log('❌ Gemini service health check failed:', error.message);
+            return false;
         }
     }
 }

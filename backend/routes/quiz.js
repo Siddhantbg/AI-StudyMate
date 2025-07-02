@@ -1,4 +1,4 @@
-// backend/routes/quiz.js
+// backend/routes/quiz.js - Enhanced error handling
 const express = require('express');
 const router = express.Router();
 const geminiClient = require('../utils/geminiClient');
@@ -18,6 +18,9 @@ router.post('/generate', async (req, res) => {
         if (!pages || !Array.isArray(pages) || pages.length === 0) {
             return res.status(400).json({ error: 'Pages array is required' });
         }
+
+        // Validate question count
+        const validQuestionCount = Math.min(Math.max(parseInt(questionCount) || 5, 1), 10);
 
         const filePath = path.join(__dirname, '..', 'uploads', filename);
         
@@ -40,7 +43,36 @@ router.post('/generate', async (req, res) => {
         const pagesText = pdfData.text;
         const pagesRange = `${Math.min(...pages)}-${Math.max(...pages)}`;
 
-        const quiz = await geminiClient.generateQuiz(pagesText, pagesRange, questionCount);
+        console.log(`🎯 Generating quiz: ${validQuestionCount} questions from pages ${pagesRange}`);
+
+        // Try to generate quiz with enhanced error handling
+        let quiz;
+        try {
+            quiz = await geminiClient.generateQuiz(pagesText, pagesRange, validQuestionCount);
+        } catch (geminiError) {
+            console.error('Gemini quiz generation failed:', geminiError.message);
+            
+            // Return user-friendly error based on the specific issue
+            if (geminiError.message.includes('overloaded')) {
+                return res.status(503).json({ 
+                    error: 'AI service is temporarily busy. Please try again in a moment.',
+                    details: 'The AI service is experiencing high demand. Try again in 30-60 seconds.',
+                    retryAfter: 30
+                });
+            } else if (geminiError.message.includes('Too many requests')) {
+                return res.status(429).json({ 
+                    error: 'Too many requests. Please wait before trying again.',
+                    details: 'You\'ve made too many requests recently. Please wait a moment.',
+                    retryAfter: 60
+                });
+            } else {
+                return res.status(500).json({ 
+                    error: 'Failed to generate quiz',
+                    details: 'The AI service encountered an error. Please try again.',
+                    fallback: 'Try reducing the number of questions or selecting fewer pages.'
+                });
+            }
+        }
         
         res.json({
             success: true,
@@ -48,12 +80,14 @@ router.post('/generate', async (req, res) => {
             metadata: {
                 filename: filename,
                 pages: pages,
-                questionCount: questionCount,
+                questionCount: validQuestionCount,
                 difficulty: difficulty,
                 totalPages: pdfData.numpages,
-                generatedAt: new Date().toISOString()
+                generatedAt: new Date().toISOString(),
+                model: 'gemini-1.5-flash'
             }
         });
+
     } catch (error) {
         console.error('Quiz generation error:', error);
         res.status(500).json({ 
@@ -72,7 +106,28 @@ router.post('/generate-from-text', async (req, res) => {
             return res.status(400).json({ error: 'Text content is required' });
         }
 
-        const quiz = await geminiClient.generateQuiz(text, topic || 'Custom Text', questionCount);
+        const validQuestionCount = Math.min(Math.max(parseInt(questionCount) || 5, 1), 8);
+
+        console.log(`🎯 Generating quiz from text: ${validQuestionCount} questions`);
+
+        let quiz;
+        try {
+            quiz = await geminiClient.generateQuiz(text, topic || 'Custom Text', validQuestionCount);
+        } catch (geminiError) {
+            console.error('Gemini quiz generation from text failed:', geminiError.message);
+            
+            if (geminiError.message.includes('overloaded')) {
+                return res.status(503).json({ 
+                    error: 'AI service is temporarily busy. Please try again in a moment.',
+                    retryAfter: 30
+                });
+            } else {
+                return res.status(500).json({ 
+                    error: 'Failed to generate quiz from text',
+                    details: 'Please try again with shorter text or fewer questions.'
+                });
+            }
+        }
         
         res.json({
             success: true,
@@ -80,7 +135,7 @@ router.post('/generate-from-text', async (req, res) => {
             metadata: {
                 source: 'text_input',
                 topic: topic || 'Custom Text',
-                questionCount: questionCount,
+                questionCount: validQuestionCount,
                 difficulty: difficulty,
                 textLength: text.length,
                 generatedAt: new Date().toISOString()
@@ -182,6 +237,29 @@ router.get('/stats', (req, res) => {
         res.status(500).json({ 
             error: 'Failed to get quiz statistics',
             details: error.message 
+        });
+    }
+});
+
+// Health check for quiz service
+router.get('/health', async (req, res) => {
+    try {
+        const isHealthy = await geminiClient.checkServiceHealth();
+        
+        res.json({
+            success: true,
+            status: isHealthy ? 'healthy' : 'degraded',
+            timestamp: new Date().toISOString(),
+            service: 'Quiz Generation',
+            ai_model: 'gemini-1.5-flash'
+        });
+    } catch (error) {
+        console.error('Quiz health check error:', error);
+        res.status(500).json({ 
+            success: false,
+            status: 'unhealthy',
+            error: error.message,
+            timestamp: new Date().toISOString()
         });
     }
 });

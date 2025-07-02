@@ -176,6 +176,16 @@ body {
   width: 100%;
 }
 
+/* Upload Section */
+.upload-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xl);
+  max-width: 800px;
+  width: 100%;
+  margin: 0 auto;
+}
+
 /* Upload Area */
 .upload-area {
   background: rgba(255,255,255,0.9);
@@ -443,6 +453,105 @@ body {
   position: absolute;
   pointer-events: auto;
   z-index: 5;
+}
+
+/* Text selection styling when annotation tools are active */
+.pdf-page-container.annotation-active .react-pdf__Page__textContent {
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+}
+
+/* Enhanced selection appearance - Blue color */
+.pdf-page-container.annotation-active .react-pdf__Page__textContent::selection {
+  background-color: rgba(0, 123, 255, 0.4);
+}
+
+.pdf-page-container.annotation-active .react-pdf__Page__textContent::-moz-selection {
+  background-color: rgba(0, 123, 255, 0.4);
+}
+
+/* Global text selection override for PDF viewer */
+.pdf-page-container ::selection {
+  background-color: rgba(0, 123, 255, 0.4);
+}
+
+.pdf-page-container ::-moz-selection {
+  background-color: rgba(0, 123, 255, 0.4);
+}
+
+/* Visual feedback for active annotation tools */
+.pdf-page-container.highlight-active {
+  cursor: text;
+}
+
+.pdf-page-container.underline-active {
+  cursor: text;
+}
+
+.pdf-page-container.erase-active {
+  cursor: crosshair;
+}
+
+/* Visual feedback for annotations when erase tool is active */
+.pdf-page-container.erase-active .annotation {
+  transition: all 0.2s ease;
+}
+
+.pdf-page-container.erase-active .annotation:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+  z-index: 50;
+}
+
+/* Selection toolbar styling */
+.selection-toolbar {
+  animation: fadeInUp 0.2s ease-out;
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--forest-accent) !important;
+  box-shadow: var(--shadow-medium) !important;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.selection-toolbar-btn {
+  transition: all 0.2s ease;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.selection-toolbar-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.selection-toolbar-btn.highlight-btn:hover {
+  background: #ffeb3b !important;
+}
+
+.selection-toolbar-btn.underline-btn:hover {
+  background: #b91c1c !important;
+}
+
+.selection-toolbar-btn.cancel-btn:hover {
+  background: #e5e7eb !important;
+}
+
+.selection-toolbar-btn.erase-btn:hover {
+  background: #dc2626 !important;
 }
 
 .highlight-annotation {
@@ -1216,8 +1325,9 @@ body {
 
 .range-actions {
   display: flex;
+  flex-direction: column;
   gap: var(--spacing-sm);
-  align-items: center;
+  align-items: stretch;
 }
 
 .action-button.secondary {
@@ -1227,7 +1337,12 @@ body {
 .action-button.small {
   padding: var(--spacing-xs) var(--spacing-sm);
   font-size: 0.8rem;
-  flex: none;
+  flex: 1;
+  min-width: fit-content;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .result-timestamp {
@@ -1262,7 +1377,10 @@ body {
 
 .page-selection-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--spacing-xs);
+  align-items: center;
+  justify-content: space-between;
 }
 
 .page-button.current {
@@ -1356,6 +1474,234 @@ body {
   flex: 1;
 }
 
+/* File Manager Styles */
+.file-manager {
+  margin-bottom: var(--spacing-lg);
+}
+
+.file-manager-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-md);
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 1px solid var(--forest-light);
+}
+
+.file-manager-header h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--forest-primary);
+  font-family: var(--font-heading);
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.refresh-btn {
+  background: var(--forest-light);
+  border: 1px solid var(--forest-accent);
+  color: var(--forest-primary);
+  padding: var(--spacing-xs);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 14px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.refresh-btn:hover {
+  background: var(--forest-accent);
+  color: white;
+}
+
+.file-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--forest-light);
+  border-radius: 8px;
+  background: white;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  padding: var(--spacing-md);
+  border-bottom: 1px solid var(--forest-fog);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.file-item:last-child {
+  border-bottom: none;
+}
+
+.file-item:hover {
+  background: var(--forest-fog);
+}
+
+.file-item.loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.file-icon {
+  color: var(--forest-secondary);
+  margin-right: var(--spacing-md);
+  flex-shrink: 0;
+}
+
+.file-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-name {
+  font-weight: 500;
+  color: var(--forest-primary);
+  margin-bottom: var(--spacing-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.9rem;
+}
+
+.file-meta {
+  display: flex;
+  gap: var(--spacing-sm);
+  font-size: 0.75rem;
+  color: var(--forest-accent);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.file-date {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.file-source {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.file-source.server {
+  background: var(--forest-secondary);
+  color: white;
+}
+
+.file-source.local {
+  background: var(--forest-accent);
+  color: white;
+}
+
+.file-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+  flex-shrink: 0;
+}
+
+.load-btn, .delete-btn {
+  background: none;
+  border: 1px solid var(--forest-accent);
+  color: var(--forest-accent);
+  padding: var(--spacing-xs);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+}
+
+.load-btn:hover {
+  background: var(--forest-secondary);
+  border-color: var(--forest-secondary);
+  color: white;
+}
+
+.delete-btn:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: white;
+}
+
+.load-btn:disabled, .delete-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mini-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid transparent;
+  border-top: 2px solid currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.file-manager-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--spacing-xl);
+  color: var(--forest-accent);
+}
+
+.file-manager-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--spacing-xl);
+  text-align: center;
+  color: var(--forest-accent);
+}
+
+.file-manager-empty .empty-icon {
+  opacity: 0.5;
+  margin-bottom: var(--spacing-md);
+}
+
+.file-manager-empty h3 {
+  color: var(--forest-primary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.file-manager-empty p {
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+/* Scrollbar styling for file list */
+.file-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.file-list::-webkit-scrollbar-track {
+  background: var(--forest-fog);
+}
+
+.file-list::-webkit-scrollbar-thumb {
+  background: var(--forest-accent);
+  border-radius: 3px;
+}
+
+.file-list::-webkit-scrollbar-thumb:hover {
+  background: var(--forest-secondary);
+}
+
 /* Print Styles */
 @media print {
   .app-header,
@@ -1368,5 +1714,374 @@ body {
   .pdf-container {
     box-shadow: none;
     border-radius: 0;
+  }
+}
+
+/* Enhanced CSS for navigation arrows and better quiz display */
+/* Add this to your forest-theme.css file */
+
+/* Page Navigation Container */
+.page-buttons-container {
+  margin: var(--spacing-md) 0;
+}
+
+.page-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  background: var(--forest-fog);
+  border-radius: 8px;
+  border: 1px solid var(--forest-accent);
+}
+
+.nav-arrow-btn {
+  background: var(--forest-secondary);
+  color: white;
+  border: none;
+  padding: var(--spacing-xs);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+}
+
+.nav-arrow-btn:hover:not(:disabled) {
+  background: var(--forest-primary);
+  transform: translateY(-1px);
+}
+
+.nav-arrow-btn:disabled {
+  background: var(--forest-light);
+  color: var(--forest-accent);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.page-range-indicator {
+  font-weight: 600;
+  color: var(--forest-primary);
+  font-size: 0.9rem;
+  background: white;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: 4px;
+  border: 1px solid var(--forest-accent);
+}
+
+/* Enhanced Page Buttons */
+.page-buttons {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--spacing-xs);
+  margin: var(--spacing-sm) 0;
+}
+
+.page-button {
+  background: var(--forest-light);
+  border: 2px solid var(--forest-accent);
+  color: var(--forest-primary);
+  padding: var(--spacing-xs);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 500;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+}
+
+.page-button:hover {
+  background: var(--forest-accent);
+  color: white;
+  transform: translateY(-1px);
+}
+
+.page-button.selected {
+  background: var(--forest-secondary);
+  color: white;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.page-button.current {
+  background: var(--flower-yellow);
+  color: var(--forest-primary);
+  border-color: var(--forest-secondary);
+  font-weight: 600;
+  box-shadow: 0 0 0 2px var(--forest-secondary);
+}
+
+.page-button.selected.current {
+  background: var(--forest-primary);
+  color: white;
+  border-color: var(--flower-yellow);
+  box-shadow: 0 0 0 2px var(--flower-yellow);
+}
+
+/* Enhanced Quiz Results Display */
+.quiz-results {
+  max-height: none; /* Remove height restriction */
+  overflow: visible; /* Allow full content to show */
+}
+
+.quiz-content-container {
+  max-height: 600px; /* Set container height instead */
+  overflow-y: auto;
+  border: 1px solid var(--forest-light);
+  border-radius: 8px;
+  background: white;
+}
+
+.quiz-content {
+  padding: var(--spacing-md);
+}
+
+.quiz-question {
+  background: var(--forest-fog);
+  padding: var(--spacing-lg);
+  border-radius: 12px;
+  margin-bottom: var(--spacing-lg);
+  border-left: 4px solid var(--forest-accent);
+  box-shadow: var(--shadow-soft);
+}
+
+.quiz-question h5 {
+  color: var(--forest-secondary);
+  margin-bottom: var(--spacing-md);
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--forest-light);
+  border-radius: 6px;
+  display: inline-block;
+}
+
+.question-text {
+  color: var(--forest-primary);
+  margin-bottom: var(--spacing-lg);
+  font-size: 1.1rem;
+  line-height: 1.6;
+  font-weight: 500;
+}
+
+.quiz-options {
+  list-style: none;
+  margin: var(--spacing-md) 0;
+  padding: 0;
+}
+
+.quiz-options li {
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+  color: var(--forest-primary);
+  background: white;
+  border: 2px solid var(--forest-light);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.quiz-options li:hover {
+  border-color: var(--forest-accent);
+  background: var(--forest-fog);
+}
+
+.quiz-options li.correct {
+  background: var(--flower-yellow);
+  border-color: var(--forest-secondary);
+  color: var(--forest-primary);
+  font-weight: 600;
+}
+
+.option-letter {
+  font-weight: 700;
+  color: var(--forest-secondary);
+  margin-right: var(--spacing-sm);
+  background: var(--forest-light);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.correct-indicator {
+  color: var(--forest-secondary);
+  font-weight: 700;
+  margin-left: var(--spacing-sm);
+}
+
+.true-false-answer {
+  background: var(--flower-yellow);
+  padding: var(--spacing-md);
+  border-radius: 8px;
+  margin: var(--spacing-md) 0;
+  color: var(--forest-primary);
+  font-weight: 600;
+  border-left: 4px solid var(--forest-secondary);
+}
+
+.sample-answer, .key-points {
+  background: var(--forest-light);
+  padding: var(--spacing-md);
+  border-radius: 8px;
+  margin-top: var(--spacing-md);
+  border: 1px solid var(--forest-accent);
+}
+
+.sample-answer {
+  border-left: 4px solid var(--flower-pink);
+}
+
+.key-points {
+  border-left: 4px solid var(--flower-lavender);
+}
+
+.key-points ul {
+  margin: var(--spacing-sm) 0 0 var(--spacing-lg);
+  padding: 0;
+}
+
+.key-points li {
+  margin-bottom: var(--spacing-sm);
+  color: var(--forest-primary);
+}
+
+.quiz-explanation {
+  font-style: italic;
+  color: var(--forest-secondary);
+  font-size: 0.95rem;
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--forest-fog);
+  border-radius: 6px;
+  border-left: 3px solid var(--forest-accent);
+}
+
+.quiz-text-content {
+  background: white;
+  padding: var(--spacing-lg);
+  border-radius: 8px;
+  font-family: monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  line-height: 1.5;
+  border: 1px solid var(--forest-light);
+}
+
+.quiz-text-content h5 {
+  font-family: var(--font-heading);
+  color: var(--forest-primary);
+  margin-bottom: var(--spacing-md);
+}
+
+.quiz-text-content pre {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* Enhanced Page Note */
+.page-note {
+  background: var(--flower-yellow);
+  padding: var(--spacing-sm);
+  border-radius: 6px;
+  margin-top: var(--spacing-sm);
+  border: 1px solid var(--forest-accent);
+}
+
+.page-note p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--forest-primary);
+  font-style: italic;
+  text-align: center;
+}
+
+/* Enhanced Selected Pages Display */
+.selected-pages {
+  margin-top: var(--spacing-lg);
+  padding: var(--spacing-md);
+  background: linear-gradient(135deg, var(--flower-yellow) 0%, var(--flower-pink) 100%);
+  border-radius: 12px;
+  font-size: 0.95rem;
+  color: var(--forest-primary);
+  box-shadow: var(--shadow-soft);
+}
+
+.pages-list {
+  color: var(--forest-secondary);
+  margin-left: var(--spacing-sm);
+  font-weight: 600;
+}
+
+.pages-summary {
+  color: var(--forest-accent);
+  font-style: italic;
+}
+
+/* Scrollbar Styling for Quiz Content */
+.quiz-content-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.quiz-content-container::-webkit-scrollbar-track {
+  background: var(--forest-light);
+  border-radius: 4px;
+}
+
+.quiz-content-container::-webkit-scrollbar-thumb {
+  background: var(--forest-accent);
+  border-radius: 4px;
+}
+
+.quiz-content-container::-webkit-scrollbar-thumb:hover {
+  background: var(--forest-secondary);
+}
+
+/* Responsive Design for Page Buttons */
+@media (max-width: 768px) {
+  .page-buttons {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  
+  .page-navigation {
+    flex-direction: column;
+    gap: var(--spacing-sm);
+  }
+  
+  .page-range-indicator {
+    order: -1;
+  }
+  
+  .quiz-question {
+    padding: var(--spacing-md);
+  }
+  
+  .question-text {
+    font-size: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .page-buttons {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  
+  .page-button {
+    min-height: 32px;
+    font-size: 0.8rem;
+  }
+  
+  .nav-arrow-btn {
+    min-width: 28px;
+    height: 28px;
   }
 }
