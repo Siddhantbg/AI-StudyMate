@@ -273,6 +273,90 @@ class GeminiClient {
         }
     }
 
+    async analyzeHighlights(text, pageNumber = null) {
+        const operation = async () => {
+            const truncatedText = text.substring(0, 8000);
+            const prompt = `
+                Analyze the following text from a PDF document${pageNumber ? ` (Page ${pageNumber})` : ''} and identify the most important passages that should be highlighted for studying purposes.
+
+                Text: "${truncatedText}" ${text.length > 8000 ? '...(truncated)' : ''}
+
+                Please identify text segments that are:
+                1. Key concepts and definitions
+                2. Important facts, data, or statistics
+                3. Main conclusions or takeaways
+                4. Technical terms or terminology
+                5. Critical statements or arguments
+                6. Examples that illustrate important concepts
+
+                Return your response as valid JSON in this exact format:
+                {
+                    "suggestions": [
+                        {
+                            "text": "exact text to highlight",
+                            "reason": "why this should be highlighted",
+                            "importance": "high|medium|low",
+                            "category": "definition|fact|conclusion|term|argument|example"
+                        }
+                    ]
+                }
+
+                Important rules:
+                - Only include text that appears EXACTLY in the provided content
+                - Keep highlighted text segments to 1-3 sentences maximum
+                - Focus on the most study-worthy content
+                - Return ONLY valid JSON, no additional text
+                - Limit to maximum 8 suggestions to avoid overwhelming the user
+            `;
+
+            const result = await this.model.generateContent(prompt);
+            const response = await result.response;
+            const responseText = response.text();
+            
+            try {
+                // Clean the response text
+                const cleanJson = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+                const jsonResponse = JSON.parse(cleanJson);
+                
+                // Validate the response structure
+                if (!jsonResponse.suggestions || !Array.isArray(jsonResponse.suggestions)) {
+                    throw new Error('Invalid response structure');
+                }
+                
+                // Filter out suggestions with text that doesn't exist in the original
+                const validSuggestions = jsonResponse.suggestions.filter(suggestion => {
+                    return suggestion.text && 
+                           suggestion.reason && 
+                           suggestion.importance && 
+                           suggestion.category &&
+                           text.includes(suggestion.text.trim());
+                }).slice(0, 8); // Limit to 8 suggestions max
+                
+                return {
+                    suggestions: validSuggestions,
+                    pageNumber: pageNumber,
+                    analyzedAt: new Date().toISOString()
+                };
+            } catch (parseError) {
+                console.log('JSON parsing failed for highlight analysis, providing fallback');
+                // Return a structured fallback response
+                return {
+                    suggestions: [],
+                    error: 'AI analysis completed but response format needs adjustment',
+                    fallbackContent: responseText,
+                    pageNumber: pageNumber,
+                    analyzedAt: new Date().toISOString()
+                };
+            }
+        };
+
+        try {
+            return await this.retryWithBackoff(operation);
+        } catch (error) {
+            throw this.handleGeminiError(error, 'highlight analysis');
+        }
+    }
+
     // Method to check service status
     async checkServiceHealth() {
         try {

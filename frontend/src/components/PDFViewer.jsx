@@ -1,7 +1,7 @@
 // FINAL WORKING FIX - PDFViewer.jsx
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight, Highlighter, MessageSquare, Pencil, Underline, Eraser } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight, Highlighter, MessageSquare, Pencil, Underline, Eraser, Brain } from 'lucide-react';
 import pdfjsWorker from 'react-pdf/dist/pdf.worker.entry.js?url';
 
 // Import required CSS for react-pdf v10
@@ -32,8 +32,14 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
   const [selectedText, setSelectedText] = useState(null);
   const [selectionCoords, setSelectionCoords] = useState(null);
   const [eraseSuccessMessage, setEraseSuccessMessage] = useState(null);
+  const [isEditingPage, setIsEditingPage] = useState(false);
+  const [pageInputValue, setPageInputValue] = useState('');
+  const [aiSuggestions, setAiSuggestions] = useState([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiSuggestionsVisible, setAiSuggestionsVisible] = useState(false);
   const pageRef = useRef(null);
   const textLayerRef = useRef(null);
+  const pageInputRef = useRef(null);
 
   // FIXED: Memoize options to prevent unnecessary reloads
   const documentOptions = useMemo(() => ({
@@ -218,6 +224,331 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     if (currentPage < numPages) {
       onPageChange(currentPage + 1);
     }
+  };
+
+  // Page jumping functionality
+  const handlePageInfoClick = () => {
+    setIsEditingPage(true);
+    setPageInputValue(currentPage.toString());
+    // Focus the input after state update
+    setTimeout(() => {
+      if (pageInputRef.current) {
+        pageInputRef.current.focus();
+        pageInputRef.current.select();
+      }
+    }, 10);
+  };
+
+  const handlePageInputChange = (e) => {
+    const value = e.target.value;
+    // Allow empty string during typing, or valid numbers
+    if (value === '' || /^\d+$/.test(value)) {
+      setPageInputValue(value);
+    }
+  };
+
+  const handlePageInputKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      confirmPageJump();
+    } else if (e.key === 'Escape') {
+      cancelPageEdit();
+    }
+  };
+
+  const handlePageInputBlur = () => {
+    confirmPageJump();
+  };
+
+  const confirmPageJump = () => {
+    const pageNum = parseInt(pageInputValue, 10);
+    
+    if (pageInputValue === '' || isNaN(pageNum) || pageNum < 1 || pageNum > numPages) {
+      // Invalid input - revert to current page
+      setPageInputValue(currentPage.toString());
+    } else if (pageNum !== currentPage) {
+      // Valid page number and different from current
+      onPageChange(pageNum);
+    }
+    
+    setIsEditingPage(false);
+  };
+
+  const cancelPageEdit = () => {
+    setPageInputValue(currentPage.toString());
+    setIsEditingPage(false);
+  };
+
+  // AI Suggestions functionality
+  const extractPageText = () => {
+    if (!textLayerRef.current) return '';
+    
+    // Extract text from the current page's text layer
+    const textItems = textLayerRef.current.querySelectorAll('[role="presentation"]');
+    let pageText = '';
+    
+    textItems.forEach(item => {
+      pageText += item.textContent + ' ';
+    });
+    
+    return pageText.trim();
+  };
+
+  // Find exact text within the PDF text layer with multi-line support
+  const findTextInPDFLayer = (searchText) => {
+    if (!textLayerRef.current || !searchText) return null;
+    
+    const textItems = textLayerRef.current.querySelectorAll('[role="presentation"]');
+    const cleanSearchText = searchText.trim().toLowerCase();
+    
+    // First try exact match in single elements
+    for (let item of textItems) {
+      const itemText = item.textContent.trim().toLowerCase();
+      if (itemText.includes(cleanSearchText)) {
+        return { 
+          elements: [item], 
+          text: item.textContent.trim(),
+          isMultiLine: false 
+        };
+      }
+    }
+    
+    // Try to find text that spans multiple elements
+    const itemsArray = Array.from(textItems);
+    for (let i = 0; i < itemsArray.length; i++) {
+      let combinedText = '';
+      let matchingElements = [];
+      
+      // Try combining text from consecutive elements
+      for (let j = i; j < Math.min(i + 5, itemsArray.length); j++) { // Check up to 5 consecutive elements
+        combinedText += itemsArray[j].textContent.trim() + ' ';
+        matchingElements.push(itemsArray[j]);
+        
+        if (combinedText.toLowerCase().includes(cleanSearchText)) {
+          return {
+            elements: matchingElements,
+            text: combinedText.trim(),
+            isMultiLine: matchingElements.length > 1
+          };
+        }
+      }
+    }
+    
+    // If no exact match, try fuzzy matching by words
+    const searchWords = cleanSearchText.split(/\s+/);
+    const minWordsMatch = Math.max(1, Math.floor(searchWords.length * 0.6)); // At least 60% word match
+    
+    for (let item of textItems) {
+      const itemText = item.textContent.trim().toLowerCase();
+      const itemWords = itemText.split(/\s+/);
+      
+      let matchedWords = 0;
+      for (let searchWord of searchWords) {
+        if (itemWords.some(word => word.includes(searchWord) || searchWord.includes(word))) {
+          matchedWords++;
+        }
+      }
+      
+      if (matchedWords >= minWordsMatch) {
+        return { 
+          elements: [item], 
+          text: item.textContent.trim(),
+          isMultiLine: false 
+        };
+      }
+    }
+    
+    // Try partial word matching for better results
+    for (let item of textItems) {
+      const itemText = item.textContent.trim().toLowerCase();
+      
+      // Check if any significant portion of the search text appears
+      const searchParts = cleanSearchText.split(/[.!?;]/); // Split by sentence endings
+      for (let part of searchParts) {
+        const cleanPart = part.trim();
+        if (cleanPart.length > 10 && itemText.includes(cleanPart)) {
+          return { 
+            elements: [item], 
+            text: item.textContent.trim(),
+            isMultiLine: false 
+          };
+        }
+      }
+    }
+    
+    return null;
+  };
+
+  // Get coordinates for text elements (supports single or multiple elements)
+  const getTextElementCoordinates = (foundTextData) => {
+    if (!foundTextData || !foundTextData.elements || !textLayerRef.current) return null;
+    
+    try {
+      const textLayerRect = textLayerRef.current.getBoundingClientRect();
+      const coordinates = [];
+      
+      // Process each element to get coordinates
+      for (let element of foundTextData.elements) {
+        const elementRect = element.getBoundingClientRect();
+        
+        // Calculate relative coordinates
+        const relativeX = elementRect.left - textLayerRect.left;
+        const relativeY = elementRect.top - textLayerRect.top;
+        const relativeWidth = elementRect.width;
+        const relativeHeight = elementRect.height;
+        
+        let finalCoords = {
+          x: relativeX,
+          y: relativeY,
+          width: relativeWidth,
+          height: relativeHeight
+        };
+        
+        // Apply rotation transformation if needed
+        if (rotation !== 0) {
+          finalCoords = applyRotationToCoords(finalCoords, rotation, pageRef.current);
+        }
+        
+        coordinates.push(finalCoords);
+      }
+      
+      return coordinates.length > 0 ? coordinates : null;
+    } catch (error) {
+      console.warn('Error getting text element coordinates:', error);
+      return null;
+    }
+  };
+
+  const analyzePageForHighlights = async () => {
+    if (!uploadedFileName || isAnalyzing) return;
+    
+    setIsAnalyzing(true);
+    
+    try {
+      const pageText = extractPageText();
+      
+      if (!pageText || pageText.length < 50) {
+        alert('Not enough text on this page for AI analysis. Please try a page with more content.');
+        return;
+      }
+
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/gemini/analyze-highlights`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: pageText,
+          pageNumber: currentPage
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setAiSuggestions(result.analysis.suggestions || []);
+        setAiSuggestionsVisible(true);
+        console.log('AI analysis completed:', result.analysis.suggestions?.length || 0, 'suggestions');
+      } else {
+        throw new Error(result.error || 'Failed to analyze page');
+      }
+    } catch (error) {
+      console.error('AI analysis error:', error);
+      alert('Failed to analyze page for highlights. Please try again.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const toggleAiSuggestions = () => {
+    if (aiSuggestions.length === 0) {
+      analyzePageForHighlights();
+    } else {
+      setAiSuggestionsVisible(!aiSuggestionsVisible);
+    }
+  };
+
+  const acceptAiSuggestion = (suggestion, index) => {
+    // Try to find the exact text in the PDF layer
+    const foundText = findTextInPDFLayer(suggestion.text);
+    
+    if (foundText && foundText.elements && foundText.elements.length > 0) {
+      // Get accurate coordinates for the found text
+      const coordinates = getTextElementCoordinates(foundText);
+      
+      if (coordinates && coordinates.length > 0) {
+        // Create AI highlight with accurate positioning
+        const aiHighlight = {
+          id: Date.now() + index,
+          type: 'highlight',
+          text: suggestion.text,
+          isAISuggested: true,
+          aiCategory: suggestion.category,
+          aiReason: suggestion.reason,
+          aiImportance: suggestion.importance,
+          color: '#4ade80', // Green color for AI suggestions
+          isTextSelection: true, // Mark as text-based highlighting
+          coordinates: coordinates, // Use coordinates array from text elements
+          foundText: foundText.text, // Store the actual found text
+          isMultiLine: foundText.isMultiLine // Track if spans multiple lines
+        };
+
+        const pageKey = `page-${currentPage}`;
+        setAnnotations(prev => ({
+          ...prev,
+          [pageKey]: [...(prev[pageKey] || []), aiHighlight]
+        }));
+
+        // Remove from suggestions
+        setAiSuggestions(prev => prev.filter((_, i) => i !== index));
+        
+        console.log('AI highlight placed at coordinates:', coordinates, foundText.isMultiLine ? '(multi-line)' : '(single-line)');
+        return;
+      }
+    }
+    
+    // Fallback to basic positioning if text not found
+    console.warn('Could not find exact text location for:', suggestion.text.substring(0, 50), '...');
+    
+    const aiHighlight = {
+      id: Date.now() + index,
+      type: 'highlight',
+      text: suggestion.text,
+      isAISuggested: true,
+      aiCategory: suggestion.category,
+      aiReason: suggestion.reason,
+      aiImportance: suggestion.importance,
+      color: '#4ade80', // Green color for AI suggestions
+      isTextSelection: false,
+      x: 50 + (index * 20), // Fallback positioning
+      y: 50 + (index * 30),
+      width: Math.min(suggestion.text.length * 8, 400),
+      height: 20
+    };
+
+    const pageKey = `page-${currentPage}`;
+    setAnnotations(prev => ({
+      ...prev,
+      [pageKey]: [...(prev[pageKey] || []), aiHighlight]
+    }));
+
+    // Remove from suggestions
+    setAiSuggestions(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const rejectAiSuggestion = (index) => {
+    setAiSuggestions(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const acceptAllAiSuggestions = () => {
+    aiSuggestions.forEach((suggestion, index) => {
+      acceptAiSuggestion(suggestion, index);
+    });
+    setAiSuggestions([]);
+  };
+
+  const rejectAllAiSuggestions = () => {
+    setAiSuggestions([]);
+    setAiSuggestionsVisible(false);
   };
 
   // Annotation Tools
@@ -417,14 +748,6 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     return null;
   };
 
-  // Check if point is within rectangle bounds
-  const isPointInRectangle = (x, y, rect) => {
-    return x >= rect.x && 
-           x <= rect.x + rect.width && 
-           y >= rect.y && 
-           y <= rect.y + rect.height;
-  };
-
   // Check if point is within rectangle bounds with tolerance for easier clicking
   const isPointInRectangleWithTolerance = (x, y, rect, tolerance = 5) => {
     return x >= rect.x - tolerance && 
@@ -580,7 +903,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
             return annotation.coordinates.map((coord, index) => (
               <div
                 key={`${annotation.id}-${index}`}
-                className="annotation highlight-annotation"
+                className={`annotation highlight-annotation ${annotation.isAISuggested ? 'ai-suggested' : ''}`}
                 data-annotation-id={annotation.id}
                 style={{
                   position: 'absolute',
@@ -602,7 +925,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
             return (
               <div
                 key={annotation.id}
-                className="annotation highlight-annotation"
+                className={`annotation highlight-annotation ${annotation.isAISuggested ? 'ai-suggested' : ''}`}
                 data-annotation-id={annotation.id}
                 style={{
                   position: 'absolute',
@@ -738,9 +1061,34 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
             <ChevronLeft size={20} />
           </button>
           
-          <span className="page-info">
-            {currentPage} / {numPages || '--'}
-          </span>
+          {isEditingPage ? (
+            <input
+              ref={pageInputRef}
+              type="number"
+              min="1"
+              max={numPages || 999}
+              value={pageInputValue}
+              onChange={handlePageInputChange}
+              onKeyDown={handlePageInputKeyDown}
+              onBlur={handlePageInputBlur}
+              className="page-info page-info-input"
+              placeholder={currentPage.toString()}
+              style={{ 
+                width: '60px', 
+                minWidth: '50px',
+                textAlign: 'center',
+                fontSize: 'inherit'
+              }}
+            />
+          ) : (
+            <span 
+              className="page-info page-info-clickable" 
+              onClick={handlePageInfoClick}
+              title="Click to jump to a specific page"
+            >
+              {currentPage} / {numPages || '--'}
+            </span>
+          )}
           
           <button
             onClick={goToNextPage}
@@ -781,6 +1129,18 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
         </div>
 
         <div className="toolbar-section annotation-tools">
+          <button
+            onClick={toggleAiSuggestions}
+            className={`toolbar-btn ai-suggest-btn ${aiSuggestionsVisible ? 'active' : ''} ${isAnalyzing ? 'analyzing' : ''}`}
+            title={isAnalyzing ? 'Analyzing page...' : aiSuggestions.length > 0 ? 'Toggle AI suggestions' : 'AI suggest highlights'}
+            disabled={isAnalyzing}
+          >
+            <Brain size={20} />
+            {aiSuggestions.length > 0 && (
+              <span className="suggestion-count">{aiSuggestions.length}</span>
+            )}
+          </button>
+          
           <button
             onClick={() => setActiveAnnotationTool(
               activeAnnotationTool === 'highlight' ? null : 'highlight'
@@ -985,6 +1345,80 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
               >
                 ✕
               </button>
+            </div>
+          )}
+          
+          {/* AI Suggestions Overlay */}
+          {aiSuggestionsVisible && aiSuggestions.length > 0 && (
+            <div className="ai-suggestions-overlay">
+              <div className="ai-suggestions-header">
+                <h3>
+                  <Brain size={16} />
+                  AI Suggested Highlights ({aiSuggestions.length})
+                </h3>
+                <div className="ai-suggestions-actions">
+                  <button 
+                    onClick={acceptAllAiSuggestions}
+                    className="ai-btn ai-btn-accept-all"
+                    title="Accept all suggestions"
+                  >
+                    Accept All
+                  </button>
+                  <button 
+                    onClick={rejectAllAiSuggestions}
+                    className="ai-btn ai-btn-reject-all"
+                    title="Reject all suggestions"
+                  >
+                    Reject All
+                  </button>
+                  <button 
+                    onClick={() => setAiSuggestionsVisible(false)}
+                    className="ai-btn ai-btn-close"
+                    title="Close suggestions"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+              
+              <div className="ai-suggestions-list">
+                {aiSuggestions.map((suggestion, index) => (
+                  <div key={index} className="ai-suggestion-item">
+                    <div className="ai-suggestion-content">
+                      <div className="ai-suggestion-text">
+                        "{suggestion.text.substring(0, 100)}..."
+                      </div>
+                      <div className="ai-suggestion-meta">
+                        <span className={`ai-category ${suggestion.category}`}>
+                          {suggestion.category}
+                        </span>
+                        <span className={`ai-importance ${suggestion.importance}`}>
+                          {suggestion.importance}
+                        </span>
+                      </div>
+                      <div className="ai-suggestion-reason">
+                        {suggestion.reason}
+                      </div>
+                    </div>
+                    <div className="ai-suggestion-actions">
+                      <button 
+                        onClick={() => acceptAiSuggestion(suggestion, index)}
+                        className="ai-btn ai-btn-accept"
+                        title="Accept this suggestion"
+                      >
+                        ✓
+                      </button>
+                      <button 
+                        onClick={() => rejectAiSuggestion(index)}
+                        className="ai-btn ai-btn-reject"
+                        title="Reject this suggestion"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           

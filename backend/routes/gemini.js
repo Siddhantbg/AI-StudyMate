@@ -113,6 +113,40 @@ router.post('/study-tips', async (req, res) => {
     }
 });
 
+// Analyze text for intelligent highlighting suggestions
+router.post('/analyze-highlights', async (req, res) => {
+    try {
+        const { text, pageNumber } = req.body;
+        
+        if (!text) {
+            return res.status(400).json({ error: 'Text content is required' });
+        }
+
+        if (text.trim().length < 50) {
+            return res.status(400).json({ 
+                error: 'Text content too short for meaningful analysis (minimum 50 characters)' 
+            });
+        }
+
+        const analysis = await geminiClient.analyzeHighlights(text, pageNumber);
+        
+        res.json({
+            success: true,
+            analysis: analysis,
+            pageNumber: pageNumber || null,
+            textLength: text.length,
+            suggestionsCount: analysis.suggestions?.length || 0,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Highlight analysis error:', error);
+        res.status(500).json({ 
+            error: 'Failed to analyze highlights',
+            details: error.message 
+        });
+    }
+});
+
 // Health check for Gemini API
 router.get('/health', async (req, res) => {
     try {
