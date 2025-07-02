@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Upload, FileText, Brain, HelpCircle, Focus, TreePine } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Upload, FileText, Brain, HelpCircle, Focus, TreePine, Clock } from 'lucide-react';
 import PDFViewer from './components/PDFViewer';
 import Sidebar from './components/Sidebar';
 import FocusMode from './components/FocusMode';
@@ -17,6 +17,77 @@ function App() {
   const [focusMode, setFocusMode] = useState(false);
   const [userInactive, setUserInactive] = useState(false);
   const [lastActivity, setLastActivity] = useState(Date.now());
+  const [pageTimer, setPageTimer] = useState(0);
+
+  // Local storage helper functions for page timer (memoized to prevent re-creation)
+  const getPageTimerKey = useCallback((filename, page) => {
+    return `page-timer-${filename}-page-${page}`;
+  }, []);
+
+  const loadPageTimer = useCallback((filename, page) => {
+    if (!filename || !page) return 0;
+    const key = getPageTimerKey(filename, page);
+    const saved = localStorage.getItem(key);
+    return saved ? parseInt(saved, 10) : 0;
+  }, [getPageTimerKey]);
+
+  const savePageTimer = useCallback((filename, page, seconds) => {
+    if (!filename || !page) return;
+    const key = getPageTimerKey(filename, page);
+    localStorage.setItem(key, seconds.toString());
+  }, [getPageTimerKey]);
+
+  // Calculate total time spent on entire PDF
+  const calculateTotalPdfTime = useCallback((filename) => {
+    if (!filename) return 0;
+    let totalSeconds = 0;
+    const prefix = `page-timer-${filename}-page-`;
+    
+    // Iterate through all localStorage keys to find timer entries for this PDF
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(prefix)) {
+        const savedTime = localStorage.getItem(key);
+        if (savedTime) {
+          totalSeconds += parseInt(savedTime, 10) || 0;
+        }
+      }
+    }
+    return totalSeconds;
+  }, []);
+
+  // Format timer display (30s, 1m 30s, 5m, etc.)
+  const formatTimer = useCallback((seconds) => {
+    if (seconds < 60) {
+      return `${seconds}s`;
+    } else if (seconds < 3600) {
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = seconds % 60;
+      return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+    } else {
+      const hours = Math.floor(seconds / 3600);
+      const remainingMinutes = Math.floor((seconds % 3600) / 60);
+      return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+    }
+  }, []);
+
+  // Last page tracking functions
+  const getLastPageKey = useCallback((filename) => {
+    return `last-page-${filename}`;
+  }, []);
+
+  const loadLastPage = useCallback((filename) => {
+    if (!filename) return 1;
+    const key = getLastPageKey(filename);
+    const saved = localStorage.getItem(key);
+    return saved ? parseInt(saved, 10) : 1;
+  }, [getLastPageKey]);
+
+  const saveLastPage = useCallback((filename, page) => {
+    if (!filename || !page) return;
+    const key = getLastPageKey(filename);
+    localStorage.setItem(key, page.toString());
+  }, [getLastPageKey]);
 
   // Focus mode activity tracking
   useEffect(() => {
@@ -31,7 +102,7 @@ function App() {
       
       inactivityTimer = setTimeout(() => {
         setUserInactive(true);
-      }, 30000); // 30 seconds of inactivity
+      }, 60000); // 60 seconds of inactivity
     };
 
     const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
@@ -48,6 +119,58 @@ function App() {
       });
     };
   }, [focusMode]);
+
+  // Page timer management
+  useEffect(() => {
+    if (!pdfFile || !uploadedFileName || !currentPage) {
+      setPageTimer(0);
+      return;
+    }
+
+    // Load existing timer for this page
+    const existingTime = loadPageTimer(uploadedFileName, currentPage);
+    setPageTimer(existingTime);
+
+    // Set up timer interval
+    const timerInterval = setInterval(() => {
+      setPageTimer(prevTimer => {
+        const newTimer = prevTimer + 1;
+        // Save to localStorage every 5 seconds to avoid too frequent writes
+        if (newTimer % 5 === 0) {
+          savePageTimer(uploadedFileName, currentPage, newTimer);
+        }
+        return newTimer;
+      });
+    }, 1000);
+
+    // Cleanup function
+    return () => {
+      clearInterval(timerInterval);
+      // Save final timer value when leaving page
+      if (uploadedFileName && currentPage) {
+        setPageTimer(currentTimer => {
+          savePageTimer(uploadedFileName, currentPage, currentTimer);
+          return currentTimer;
+        });
+      }
+    };
+  }, [pdfFile, uploadedFileName, currentPage, loadPageTimer, savePageTimer]); // Include memoized functions
+
+  // Auto-save last page when page changes
+  useEffect(() => {
+    if (uploadedFileName && currentPage) {
+      saveLastPage(uploadedFileName, currentPage);
+    }
+  }, [uploadedFileName, currentPage, saveLastPage]);
+
+  // Save timer when component unmounts 
+  useEffect(() => {
+    return () => {
+      if (uploadedFileName && currentPage && pageTimer > 0) {
+        savePageTimer(uploadedFileName, currentPage, pageTimer);
+      }
+    };
+  }, []); // Empty dependency array - only runs on mount/unmount
 
 const handleFileUpload = async (file) => {
   if (!file || file.type !== 'application/pdf') {
@@ -108,9 +231,13 @@ const handleFileLoad = (file, uploadedFileName, metadata) => {
   try {
     setPdfFile(file);
     setUploadedFileName(uploadedFileName);
-    setCurrentPage(1);
+    
+    // Load last page for this file (auto-resume functionality)
+    const lastPage = loadLastPage(uploadedFileName);
+    setCurrentPage(lastPage);
     setTotalPages(0);
-    console.log('Loaded saved file:', metadata.fileName);
+    
+    console.log(`Loaded saved file: ${metadata.fileName}, resuming at page ${lastPage}`);
   } catch (error) {
     console.error('Error loading saved file:', error);
     alert('Error loading file: ' + error.message);
@@ -157,6 +284,16 @@ const handleFileLoad = (file, uploadedFileName, metadata) => {
             {pdfFile && (
               <div className="page-info">
                 Page {currentPage} of {totalPages}
+              </div>
+            )}
+            
+            {pdfFile && (
+              <div 
+                className="page-timer" 
+                title={`Current page: ${formatTimer(pageTimer)} | Total document: ${formatTimer(calculateTotalPdfTime(uploadedFileName) + pageTimer)}`}
+              >
+                <Clock size={18} />
+                <span>{formatTimer(pageTimer)}</span>
               </div>
             )}
           </div>

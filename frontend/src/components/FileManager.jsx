@@ -129,6 +129,9 @@ const FileManager = ({ onFileLoad }) => {
           <div 
             key={file.id} 
             className={`file-item ${selectedFileId === file.id ? 'loading' : ''}`}
+            onClick={() => handleFileLoad(file.id)}
+            style={{ cursor: 'pointer' }}
+            title="Click to open this PDF"
           >
             <div className="file-icon">
               <FileText size={24} />
@@ -159,7 +162,10 @@ const FileManager = ({ onFileLoad }) => {
             
             <div className="file-actions">
               <button
-                onClick={() => handleFileLoad(file.id)}
+                onClick={(e) => {
+                  e.stopPropagation(); // Prevent file item click
+                  handleFileLoad(file.id);
+                }}
                 className="load-btn"
                 title="Load this file"
                 disabled={loading}
@@ -171,7 +177,10 @@ const FileManager = ({ onFileLoad }) => {
                 )}
               </button>
               <button
-                onClick={() => handleFileDelete(file.id, file.fileName)}
+                onClick={(e) => {
+                  e.stopPropagation(); // Prevent file item click
+                  handleFileDelete(file.id, file.fileName);
+                }}
                 className="delete-btn"
                 title="Delete this file"
                 disabled={loading}

@@ -58,6 +58,7 @@ coverage/
 *.temp
 *.orig
 
+CLAUDE.md
 # === macOS ===
 .AppleDouble
 .LSOverride

@@ -165,6 +165,44 @@ body {
   backdrop-filter: blur(10px);
 }
 
+.page-timer {
+  background: rgba(255,255,255,0.15);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: 20px;
+  font-weight: 500;
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  border: 1px solid rgba(255,255,255,0.2);
+  transition: all 0.3s ease;
+  color: white;
+  font-size: 0.9rem;
+}
+
+.page-timer:hover {
+  background: rgba(255,255,255,0.25);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.page-timer svg {
+  color: var(--forest-moss);
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2));
+  animation: clockTick 2s ease-in-out infinite;
+}
+
+@keyframes clockTick {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(5deg); }
+  75% { transform: rotate(-5deg); }
+}
+
+.page-timer span {
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
 /* Main Content */
 .main-content {
   flex: 1;
@@ -481,17 +519,25 @@ body {
   background-color: rgba(0, 123, 255, 0.4);
 }
 
-/* Visual feedback for active annotation tools */
+/* Custom cursors for annotation tools */
 .pdf-page-container.highlight-active {
-  cursor: text;
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23ffff00" stroke-width="2"><path d="m9 11-6 6v3h3l6-6"/><path d="m22 12-6-6-3 3 6 6"/><path d="m8 5 3-3 3 3"/><path d="m10 2 1 3-1 3"/></svg>'), text;
 }
 
 .pdf-page-container.underline-active {
-  cursor: text;
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23dc2626" stroke-width="2"><path d="M7 12h10"/><path d="M7 16h10"/><path d="M7 8h10"/></svg>'), text;
+}
+
+.pdf-page-container.draw-active {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%232196f3" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="m18 13-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="m2 2 7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>'), crosshair;
+}
+
+.pdf-page-container.comment-active {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23ff6b6b" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'), pointer;
 }
 
 .pdf-page-container.erase-active {
-  cursor: crosshair;
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23ef4444" stroke-width="2"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.5l9.6-9.6c1-1 2.5-1 3.5 0l5.2 5.2c1 1 1 2.5 0 3.5L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>'), crosshair;
 }
 
 /* Visual feedback for annotations when erase tool is active */
@@ -503,6 +549,49 @@ body {
   transform: scale(1.05);
   box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
   z-index: 50;
+}
+
+/* Success message animation */
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Enhanced annotation hover effects for eraser mode */
+.pdf-page-container.erase-active .highlight-annotation:hover {
+  background-color: rgba(239, 68, 68, 0.3) !important;
+  outline: 2px solid #ef4444;
+}
+
+.pdf-page-container.erase-active .underline-annotation:hover {
+  background-color: #ef4444 !important;
+  outline: 2px solid #dc2626;
+}
+
+.pdf-page-container.erase-active .comment-annotation:hover {
+  background-color: #ef4444 !important;
+  outline: 2px solid #dc2626;
+  transform: scale(1.1);
+}
+
+.pdf-page-container.erase-active .drawing-annotation:hover {
+  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.8));
+}
+
+/* Cursor enhancement for better visibility */
+.pdf-page-container.annotation-active {
+  user-select: none;
+}
+
+.pdf-page-container.highlight-active,
+.pdf-page-container.underline-active {
+  user-select: text;
 }
 
 /* Selection toolbar styling */

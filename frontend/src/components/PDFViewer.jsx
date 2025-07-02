@@ -31,7 +31,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
   const [drawingPath, setDrawingPath] = useState([]);
   const [selectedText, setSelectedText] = useState(null);
   const [selectionCoords, setSelectionCoords] = useState(null);
-  const canvasRef = useRef(null);
+  const [eraseSuccessMessage, setEraseSuccessMessage] = useState(null);
   const pageRef = useRef(null);
   const textLayerRef = useRef(null);
 
@@ -384,27 +384,32 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     }
   };
 
-  // Find annotation at specific position
+  // Find annotation at specific position with enhanced precision
   const findAnnotationAtPosition = (x, y, pageAnnotations) => {
     // Check in reverse order (top annotations first)
     for (let i = pageAnnotations.length - 1; i >= 0; i--) {
       const annotation = pageAnnotations[i];
       
       if (annotation.isTextSelection && annotation.coordinates) {
-        // Check each coordinate rectangle for text-selection-based annotations
+        // Check each coordinate rectangle for text-selection-based annotations with tolerance
         for (const coord of annotation.coordinates) {
-          if (isPointInRectangle(x, y, coord)) {
+          if (isPointInRectangleWithTolerance(x, y, coord, 5)) {
             return annotation;
           }
         }
       } else if (annotation.type === 'drawing') {
-        // Check if point is near the drawing path
-        if (isPointNearPath(x, y, annotation.path)) {
+        // Check if point is near the drawing path with increased tolerance
+        if (isPointNearPath(x, y, annotation.path, 15)) {
+          return annotation;
+        }
+      } else if (annotation.type === 'comment') {
+        // Enhanced detection for comment annotations with tolerance
+        if (isPointInRectangleWithTolerance(x, y, annotation, 10)) {
           return annotation;
         }
       } else {
-        // Check legacy single-rectangle annotations
-        if (isPointInRectangle(x, y, annotation)) {
+        // Check legacy single-rectangle annotations with tolerance
+        if (isPointInRectangleWithTolerance(x, y, annotation, 5)) {
           return annotation;
         }
       }
@@ -418,6 +423,14 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
            x <= rect.x + rect.width && 
            y >= rect.y && 
            y <= rect.y + rect.height;
+  };
+
+  // Check if point is within rectangle bounds with tolerance for easier clicking
+  const isPointInRectangleWithTolerance = (x, y, rect, tolerance = 5) => {
+    return x >= rect.x - tolerance && 
+           x <= rect.x + rect.width + tolerance && 
+           y >= rect.y - tolerance && 
+           y <= rect.y + rect.height + tolerance;
   };
 
   // Check if point is near drawing path
@@ -448,13 +461,41 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     return Math.sqrt((px - projection.x) ** 2 + (py - projection.y) ** 2);
   };
 
-  // Remove annotation by ID
+  // Remove annotation by ID with visual feedback
   const removeAnnotation = (annotationId) => {
     const pageKey = `page-${currentPage}`;
-    setAnnotations(prev => ({
-      ...prev,
-      [pageKey]: (prev[pageKey] || []).filter(annotation => annotation.id !== annotationId)
-    }));
+    
+    // Show visual feedback before removing
+    const annotationElement = document.querySelector(`[data-annotation-id="${annotationId}"]`);
+    if (annotationElement) {
+      annotationElement.style.transition = 'all 0.3s ease';
+      annotationElement.style.transform = 'scale(0.8)';
+      annotationElement.style.opacity = '0';
+      
+      setTimeout(() => {
+        setAnnotations(prev => ({
+          ...prev,
+          [pageKey]: (prev[pageKey] || []).filter(annotation => annotation.id !== annotationId)
+        }));
+      }, 300);
+    } else {
+      // Fallback immediate removal if element not found
+      setAnnotations(prev => ({
+        ...prev,
+        [pageKey]: (prev[pageKey] || []).filter(annotation => annotation.id !== annotationId)
+      }));
+    }
+    
+    // Show success feedback
+    showEraseSuccessMessage();
+  };
+
+  // Show success message for erasing
+  const showEraseSuccessMessage = () => {
+    setEraseSuccessMessage('Annotation erased!');
+    setTimeout(() => {
+      setEraseSuccessMessage(null);
+    }, 2000);
   };
 
   // Handle direct annotation click for erasing
@@ -540,6 +581,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
               <div
                 key={`${annotation.id}-${index}`}
                 className="annotation highlight-annotation"
+                data-annotation-id={annotation.id}
                 style={{
                   position: 'absolute',
                   left: coord.x,
@@ -561,6 +603,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
               <div
                 key={annotation.id}
                 className="annotation highlight-annotation"
+                data-annotation-id={annotation.id}
                 style={{
                   position: 'absolute',
                   left: annotation.x,
@@ -581,6 +624,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
             <div
               key={annotation.id}
               className="annotation comment-annotation"
+              data-annotation-id={annotation.id}
               style={{
                 position: 'absolute',
                 left: annotation.x,
@@ -606,6 +650,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
             <svg
               key={annotation.id}
               className="annotation drawing-annotation"
+              data-annotation-id={annotation.id}
               style={{
                 position: 'absolute',
                 left: 0,
@@ -635,6 +680,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
               <div
                 key={`${annotation.id}-${index}`}
                 className="annotation underline-annotation"
+                data-annotation-id={annotation.id}
                 style={{
                   position: 'absolute',
                   left: coord.x,
@@ -656,6 +702,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
               <div
                 key={annotation.id}
                 className="annotation underline-annotation"
+                data-annotation-id={annotation.id}
                 style={{
                   position: 'absolute',
                   left: annotation.x,
@@ -797,6 +844,10 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
           } ${
             activeAnnotationTool === 'underline' ? 'underline-active' : ''
           } ${
+            activeAnnotationTool === 'draw' ? 'draw-active' : ''
+          } ${
+            activeAnnotationTool === 'comment' ? 'comment-active' : ''
+          } ${
             activeAnnotationTool === 'erase' ? 'erase-active' : ''
           }`}
           onClick={handlePageClick}
@@ -820,7 +871,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
               className="pdf-page"
               renderTextLayer={true}
               renderAnnotationLayer={true}
-              onGetTextSuccess={(textItems) => {
+              onGetTextSuccess={() => {
                 // Store reference to text layer for selection detection
                 setTimeout(() => {
                   const textLayer = pageRef.current?.querySelector('.react-pdf__Page__textContent');
@@ -959,6 +1010,31 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
                 strokeLinejoin="round"
               />
             </svg>
+          )}
+          
+          {/* Erase Success Message */}
+          {eraseSuccessMessage && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '20px',
+                right: '20px',
+                background: 'linear-gradient(135deg, #4caf50, #45a049)',
+                color: 'white',
+                padding: '12px 20px',
+                borderRadius: '25px',
+                fontSize: '14px',
+                fontWeight: '600',
+                boxShadow: '0 4px 12px rgba(76, 175, 80, 0.3)',
+                zIndex: 1000,
+                animation: 'slideInRight 0.3s ease-out',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              ✓ {eraseSuccessMessage}
+            </div>
           )}
         </div>
       </div>
