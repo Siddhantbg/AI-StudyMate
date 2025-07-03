@@ -4,8 +4,10 @@ import PDFViewer from './components/PDFViewer';
 import Sidebar from './components/Sidebar';
 import FocusMode from './components/FocusMode';
 import FileManager from './components/FileManager';
+import ThemeToggle from './components/ThemeToggle';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { saveFile } from './utils/fileStorage';
-import './styles/forest-theme.css';
+import './styles/main-themes.css';
 import './styles/pdf-setup.css';
 
 function App() {
@@ -262,24 +264,27 @@ const handleFileLoad = (file, uploadedFileName, metadata) => {
   };
 
   return (
-    <div className="app-container forest-theme">
-      {/* Header */}
-      <header className="app-header">
-        <div className="header-content">
-          <div className="logo-section">
-            <TreePine className="logo-icon" size={32} />
-            <h1 className="app-title">Forest PDF Viewer</h1>
-          </div>
-          
-          <div className="header-actions">
-            <button
-              className={`focus-toggle ${focusMode ? 'active' : ''}`}
-              onClick={() => setFocusMode(!focusMode)}
-              title="Toggle Focus Mode"
-            >
-              <Focus size={20} />
-              {focusMode ? 'Exit Focus' : 'Focus Mode'}
-            </button>
+    <ThemeProvider>
+      <div className="app-container">
+        {/* Header */}
+        <header className="app-header">
+          <div className="header-content">
+            <div className="logo-section">
+              <TreePine className="logo-icon" size={32} />
+              <h1 className="app-title">Forest PDF Viewer</h1>
+            </div>
+            
+            <div className="header-actions">
+              <ThemeToggle />
+              
+              <button
+                className={`focus-toggle ${focusMode ? 'active' : ''}`}
+                onClick={() => setFocusMode(!focusMode)}
+                title="Toggle Focus Mode"
+              >
+                <Focus size={20} />
+                {focusMode ? 'Exit Focus' : 'Focus Mode'}
+              </button>
             
             {pdfFile && (
               <div className="page-info">
@@ -377,7 +382,8 @@ const handleFileLoad = (file, uploadedFileName, metadata) => {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ThemeProvider>
   );
 }
 

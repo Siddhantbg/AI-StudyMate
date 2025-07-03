@@ -1,0 +1,46 @@
+/* Main CSS entry point */
+@import './styles/main-themes.css';
+
+/* Global reset and base styles */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-body, 'Open Sans', sans-serif);
+  line-height: 1.6;
+  color: var(--text-color);
+  background: var(--primary-color);
+  transition: all var(--theme-transition-speed, 0.3s) ease;
+}
+
+/* Ensure smooth theme transitions */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Focus styles for accessibility */
+*:focus {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+/* Hide outline for mouse users but keep for keyboard users */
+*:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Screen reader only content */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

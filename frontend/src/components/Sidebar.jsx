@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Loader, 
   Copy,
   CheckCircle,
@@ -28,6 +29,9 @@ const Sidebar = ({ uploadedFileName, currentPage, totalPages, onPageChange }) =>
   const [questionCount, setQuestionCount] = useState(5);
   const [copiedStates, setCopiedStates] = useState({});
   const [pageNavigationStart, setPageNavigationStart] = useState(1); // For pagination
+  const [selectedAnswers, setSelectedAnswers] = useState({}); // Track selected answers per question (now arrays)
+  const [answerFeedback, setAnswerFeedback] = useState({}); // Track feedback per question (now objects)
+  const [expandedExplanations, setExpandedExplanations] = useState({}); // Track expanded explanations
   const textareaRef = useRef(null);
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -293,6 +297,76 @@ const Sidebar = ({ uploadedFileName, currentPage, totalPages, onPageChange }) =>
   // Clear all selected quiz pages
   const clearQuizPages = () => {
     setQuizPages([]);
+  };
+
+  // Handle quiz answer selection - now allows multiple selections
+  const handleAnswerClick = (questionIndex, selectedOption, correctAnswer) => {
+    const currentSelections = selectedAnswers[questionIndex] || [];
+    const isCurrentlySelected = currentSelections.includes(selectedOption);
+    
+    if (isCurrentlySelected) {
+      // Remove from selection
+      const newSelections = currentSelections.filter(opt => opt !== selectedOption);
+      setSelectedAnswers(prev => ({ 
+        ...prev, 
+        [questionIndex]: newSelections.length > 0 ? newSelections : undefined
+      }));
+      
+      // Remove feedback for this option
+      const currentFeedback = answerFeedback[questionIndex] || {};
+      const newFeedback = { ...currentFeedback };
+      delete newFeedback[selectedOption];
+      
+      setAnswerFeedback(prev => ({
+        ...prev,
+        [questionIndex]: Object.keys(newFeedback).length > 0 ? newFeedback : undefined
+      }));
+    } else {
+      // Add to selection
+      const newSelections = [...currentSelections, selectedOption];
+      setSelectedAnswers(prev => ({ 
+        ...prev, 
+        [questionIndex]: newSelections 
+      }));
+      
+      // Add feedback for this option
+      const isCorrect = selectedOption === correctAnswer;
+      setAnswerFeedback(prev => ({
+        ...prev,
+        [questionIndex]: { 
+          ...(prev[questionIndex] || {}), 
+          [selectedOption]: isCorrect 
+        }
+      }));
+    }
+  };
+
+  // Handle true/false question selection
+  const handleTrueFalseClick = (questionIndex, selectedValue, correctAnswer) => {
+    // Prevent multiple selections for the same question
+    if (selectedAnswers[questionIndex] !== undefined) {
+      return;
+    }
+
+    const isCorrect = selectedValue === correctAnswer;
+    
+    setSelectedAnswers(prev => ({
+      ...prev,
+      [questionIndex]: selectedValue
+    }));
+
+    setAnswerFeedback(prev => ({
+      ...prev,
+      [questionIndex]: isCorrect
+    }));
+  };
+
+  // Toggle explanation visibility
+  const toggleExplanation = (questionIndex) => {
+    setExpandedExplanations(prev => ({
+      ...prev,
+      [questionIndex]: !prev[questionIndex]
+    }));
   };
 
   // Navigation functions for page cycling
@@ -630,24 +704,66 @@ Examples:
                             
                             {question.options && (
                               <ul className="quiz-options">
-                                {question.options.map((option, optIndex) => (
-                                  <li 
-                                    key={optIndex} 
-                                    className={optIndex === question.correct_answer ? 'correct' : ''}
-                                  >
-                                    <span className="option-letter">{String.fromCharCode(65 + optIndex)}.</span>
-                                    {option} 
-                                    {optIndex === question.correct_answer && <span className="correct-indicator"> ✓</span>}
-                                  </li>
-                                ))}
+                                {question.options.map((option, optIndex) => {
+                                  const selectedOptions = selectedAnswers[index] || [];
+                                  const isSelected = selectedOptions.includes(optIndex);
+                                  const feedbackForOption = answerFeedback[index] && answerFeedback[index][optIndex];
+                                  
+                                  let className = 'clickable';
+                                  if (isSelected) {
+                                    if (feedbackForOption === true) {
+                                      className = 'selected-correct';
+                                    } else if (feedbackForOption === false) {
+                                      className = 'selected-incorrect';
+                                    } else {
+                                      className = 'selected-neutral';
+                                    }
+                                  }
+                                  
+                                  return (
+                                    <li 
+                                      key={optIndex}
+                                      className={className}
+                                      onClick={() => handleAnswerClick(index, optIndex, question.correct_answer)}
+                                    >
+                                      <span className="option-letter">{String.fromCharCode(65 + optIndex)}.</span>
+                                      {option}
+                                    </li>
+                                  );
+                                })}
                               </ul>
                             )}
                             
-                            {question.correct_answer === true && (
-                              <p className="true-false-answer"><strong>Answer:</strong> True ✓</p>
-                            )}
-                            {question.correct_answer === false && (
-                              <p className="true-false-answer"><strong>Answer:</strong> False ✗</p>
+                            {/* True/False question buttons */}
+                            {(question.type === 'true_false' || typeof question.correct_answer === 'boolean') && (
+                              <div className="true-false-buttons">
+                                {[true, false].map((value) => {
+                                  const isSelected = selectedAnswers[index] === value;
+                                  const isAnswered = selectedAnswers[index] !== undefined;
+                                  const isCorrect = answerFeedback[index] === true;
+                                  const isIncorrect = answerFeedback[index] === false;
+                                  
+                                  let className = 'true-false-button';
+                                  if (isSelected && isCorrect) {
+                                    className += ' selected-correct';
+                                  } else if (isSelected && isIncorrect) {
+                                    className += ' selected-incorrect';
+                                  } else if (!isAnswered) {
+                                    className += ' clickable';
+                                  }
+                                  
+                                  return (
+                                    <button
+                                      key={value.toString()}
+                                      className={className}
+                                      onClick={() => handleTrueFalseClick(index, value, question.correct_answer)}
+                                      disabled={isAnswered}
+                                    >
+                                      {value ? 'True' : 'False'}
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             )}
                             
                             {question.sample_answer && (
@@ -668,9 +784,23 @@ Examples:
                             )}
                             
                             {question.explanation && (
-                              <p className="quiz-explanation">
-                                <strong>Explanation:</strong> <em>{question.explanation}</em>
-                              </p>
+                              <div className="quiz-explanation-container">
+                                <div 
+                                  className="quiz-explanation-header"
+                                  onClick={() => toggleExplanation(index)}
+                                >
+                                  <strong>Explanation</strong>
+                                  <ChevronDown 
+                                    size={16} 
+                                    className={`explanation-chevron ${expandedExplanations[index] ? 'expanded' : ''}`}
+                                  />
+                                </div>
+                                {expandedExplanations[index] && (
+                                  <div className="quiz-explanation-content">
+                                    <em>{question.explanation}</em>
+                                  </div>
+                                )}
+                              </div>
                             )}
                           </div>
                         ))

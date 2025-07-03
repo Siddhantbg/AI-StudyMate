@@ -1,0 +1,157 @@
+/* frontend/src/styles/themes/main-themes.css */
+/* Import all theme files */
+@import './forest-theme.css';
+@import './interstellar-theme.css';
+@import './spiderman-venom-theme.css';
+
+/* Base theme transitions */
+* {
+  transition: 
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+/* Preserve existing animations and transitions */
+.theme-transition-disabled * {
+  transition: none !important;
+}
+
+/* Global theme-aware styles */
+:root {
+  /* Base animation timing */
+  --theme-transition-speed: 0.3s;
+  --theme-animation-speed: 0.5s;
+}
+
+/* Common theme utilities */
+.theme-gradient-text {
+  background: var(--accent-gradient, linear-gradient(45deg, var(--accent-color), var(--hover-color)));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 600;
+}
+
+.theme-card {
+  background: var(--secondary-color);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1rem;
+  transition: all var(--theme-transition-speed) ease;
+}
+
+.theme-card:hover {
+  border-color: var(--accent-color);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  transform: translateY(-2px);
+}
+
+.theme-button {
+  background: var(--accent-color);
+  color: var(--text-color);
+  border: 1px solid var(--accent-color);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  transition: all var(--theme-transition-speed) ease;
+}
+
+.theme-button:hover {
+  background: var(--hover-color);
+  border-color: var(--hover-color);
+  transform: translateY(-1px);
+}
+
+/* Theme-specific cursor styles for annotation tools */
+.pdf-page-container.highlight-active {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" fill="%23ffeb3b" opacity="0.6" stroke="%23f57f17" stroke-width="2"/></svg>'), auto;
+}
+
+.pdf-page-container.underline-active {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><line x1="3" y1="18" x2="21" y2="18" stroke="%232196f3" stroke-width="3"/></svg>'), auto;
+}
+
+.pdf-page-container.drawing-active {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="%23e91e63"/></svg>'), auto;
+}
+
+.pdf-page-container.stickynote-active {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" fill="%23ffc107" stroke="%23ff8f00" stroke-width="2"/></svg>'), auto;
+}
+
+.pdf-page-container.eraser-active {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><rect x="6" y="8" width="12" height="8" fill="%23f44336" stroke="%23d32f2f" stroke-width="2"/></svg>'), auto;
+}
+
+/* Loading states */
+.theme-loading {
+  position: relative;
+  overflow: hidden;
+}
+
+.theme-loading::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  animation: theme-loading-shimmer 1.5s infinite;
+}
+
+@keyframes theme-loading-shimmer {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+/* Dark mode adjustments for all themes */
+@media (prefers-color-scheme: dark) {
+  :root:not(.theme-forest):not(.theme-interstellar):not(.theme-spiderman-venom) {
+    --primary-color: #1a1a1a;
+    --secondary-color: #2d2d2d;
+    --text-color: #ffffff;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  :root {
+    --border-color: currentColor;
+  }
+  
+  .theme-card,
+  .theme-button {
+    border-width: 2px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Print styles */
+@media print {
+  .theme-toggle-btn,
+  .toolbar,
+  .sidebar {
+    display: none !important;
+  }
+  
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  
+  .pdf-page {
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+  }
+}
