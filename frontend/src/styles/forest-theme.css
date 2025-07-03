@@ -212,6 +212,8 @@ body {
   align-items: stretch; /* Changed from flex-start */
   min-height: 0;
   width: 100%;
+  overflow: hidden; /* Prevent main content overflow */
+  height: calc(100vh - 80px); /* Fixed height for consistent viewport */
 }
 
 /* Upload Section */
@@ -763,6 +765,38 @@ body {
   box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.2);
 }
 
+/* AI Button States */
+.ai-suggest-btn.analyzing {
+  background-color: var(--forest-accent) !important;
+  color: white !important;
+  position: relative;
+  animation: pulse 2s infinite;
+}
+
+.ai-suggest-btn.analyzing::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  z-index: 1;
+}
+
+.ai-suggest-btn.analyzing .lucide {
+  opacity: 0.3;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
 /* Animations */
 @keyframes slideInRight {
   from {
@@ -1099,12 +1133,15 @@ body {
 /* PDF Display */
 .pdf-display {
   flex: 1;
-  overflow: auto;
+  overflow: auto; /* Allow scrolling for zoomed content */
   display: flex;
   justify-content: center;
-  align-items: flex-start;
-  padding: var(--spacing-sm); /* Reduced padding */
+  align-items: flex-start; /* Changed from center to flex-start for proper top alignment */
+  padding: var(--spacing-sm);
   background: var(--forest-fog);
+  height: calc(100vh - 120px);
+  max-height: calc(100vh - 120px);
+  position: relative;
 }
 
 .pdf-page-container {
@@ -1112,12 +1149,14 @@ body {
   border-radius: 8px;
   overflow: hidden;
   background: white;
+  position: relative;
+  /* Allow natural sizing for zoom functionality */
+  display: inline-block;
 }
 
 .pdf-page {
   display: block;
-  max-width: 100%;
-  height: auto;
+  /* Allow natural PDF page sizing for zoom */
 }
 
 .pdf-loading, .pdf-error {

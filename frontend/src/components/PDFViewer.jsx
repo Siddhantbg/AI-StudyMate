@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight, Highlighter, MessageSquare, Pencil, Underline, Eraser, Brain, StickyNote } from 'lucide-react';
 import pdfjsWorker from 'react-pdf/dist/pdf.worker.entry.js?url';
+import { useToast } from '../contexts/ToastContext';
 
 // Import required CSS for react-pdf v10
 import 'react-pdf/dist/Page/AnnotationLayer.css';
@@ -21,6 +22,9 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
   console.log('File constructor:', file?.constructor?.name);
   console.log('Uploaded filename:', uploadedFileName);
   console.log('Current page:', currentPage);
+
+  // Toast notifications
+  const { showToast } = useToast();
 
   const [numPages, setNumPages] = useState(null);
   const [scale, setScale] = useState(1.0);
@@ -53,43 +57,58 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     withCredentials: false
   }), []);
 
-  // PDF-intrinsic coordinate normalization functions
-  const normalizeCoordinates = (coordinates, pageContainer) => {
-    if (!coordinates || !pageContainer) return coordinates;
+  // Text layer-based coordinate normalization functions
+  const normalizeCoordinates = (coordinates, textLayer) => {
+    if (!coordinates || !textLayer) return coordinates;
     
-    const pageRect = pageContainer.getBoundingClientRect();
-    const pageWidth = pageRect.width;
-    const pageHeight = pageRect.height;
+    const textLayerRect = textLayer.getBoundingClientRect();
+    const textLayerWidth = textLayerRect.width;
+    const textLayerHeight = textLayerRect.height;
+    
+    // Validate text layer dimensions
+    if (textLayerWidth <= 0 || textLayerHeight <= 0) {
+      console.warn('Invalid text layer dimensions:', { textLayerWidth, textLayerHeight });
+      return coordinates;
+    }
     
     return coordinates.map(coord => ({
-      x: coord.x / pageWidth,
-      y: coord.y / pageHeight,
-      width: coord.width / pageWidth,
-      height: coord.height / pageHeight,
-      // Store original pixel coordinates for debugging
+      // Normalize to text layer dimensions (zoom-independent)
+      x: coord.x / textLayerWidth,
+      y: coord.y / textLayerHeight,
+      width: coord.width / textLayerWidth,
+      height: coord.height / textLayerHeight,
+      // Store metadata for debugging and validation
       _originalX: coord.x,
       _originalY: coord.y,
       _originalWidth: coord.width,
       _originalHeight: coord.height,
-      _pageWidth: pageWidth,
-      _pageHeight: pageHeight,
-      _scale: scale,
+      _textLayerWidth: textLayerWidth,
+      _textLayerHeight: textLayerHeight,
+      _scaleAtCreation: scale,
       _rotation: rotation
     }));
   };
 
-  const denormalizeCoordinates = (normalizedCoords, pageContainer) => {
-    if (!normalizedCoords || !pageContainer) return normalizedCoords;
+  const denormalizeCoordinates = (normalizedCoords) => {
+    if (!normalizedCoords || !textLayerRef.current) return normalizedCoords;
     
-    const pageRect = pageContainer.getBoundingClientRect();
-    const pageWidth = pageRect.width;
-    const pageHeight = pageRect.height;
+    const currentTextLayer = textLayerRef.current;
+    const textLayerRect = currentTextLayer.getBoundingClientRect();
+    const textLayerWidth = textLayerRect.width;
+    const textLayerHeight = textLayerRect.height;
+    
+    // Validate current text layer dimensions
+    if (textLayerWidth <= 0 || textLayerHeight <= 0) {
+      console.warn('Invalid current text layer dimensions:', { textLayerWidth, textLayerHeight });
+      return normalizedCoords;
+    }
     
     return normalizedCoords.map(coord => ({
-      x: coord.x * pageWidth,
-      y: coord.y * pageHeight,
-      width: coord.width * pageWidth,
-      height: coord.height * pageHeight
+      // Apply current text layer dimensions to normalized coordinates
+      x: coord.x * textLayerWidth,
+      y: coord.y * textLayerHeight,
+      width: coord.width * textLayerWidth,
+      height: coord.height * textLayerHeight
     }));
   };
 
@@ -133,8 +152,8 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
         coordinates.push(finalCoords);
       }
       
-      // Normalize coordinates to PDF-intrinsic system
-      const normalizedCoords = normalizeCoordinates(coordinates, pageContainer);
+      // Normalize coordinates to text layer system (zoom-independent)
+      const normalizedCoords = normalizeCoordinates(coordinates, textLayer);
       
       return normalizedCoords && normalizedCoords.length > 0 ? normalizedCoords : null;
     } catch (error) {
@@ -194,7 +213,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     return () => {
       document.removeEventListener('selectionchange', handleSelectionChange);
     };
-  }, [currentPage]);
+  }, [currentPage, scale]); // Add scale dependency for coordinate accuracy
 
   // Annotation persistence functions
   const saveAnnotations = (pageAnnotations, filename, page) => {
@@ -221,6 +240,29 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       }
     }
   }, [annotations, uploadedFileName, currentPage]);
+
+  // Force annotation re-positioning when scale or text layer changes
+  useEffect(() => {
+    // Trigger a re-render of annotations when scale changes
+    // The renderAnnotations function will automatically use the current text layer
+    // for denormalization, ensuring annotations stay in correct positions
+    if (textLayerRef.current) {
+      console.log('Scale changed to:', scale, '- annotations will be repositioned using current text layer');
+      // Force component re-render by updating a state value
+      setAnnotations(prev => ({ ...prev }));
+    }
+  }, [scale]);
+
+  // Update annotations when text layer reference changes (after zoom)
+  useEffect(() => {
+    // When text layer changes (e.g., after zoom), ensure annotations are repositioned
+    if (textLayerRef.current && uploadedFileName && currentPage) {
+      console.log('Text layer updated - refreshing annotation positions');
+      // Force re-render with current annotations
+      const pageKey = `page-${currentPage}`;
+      setAnnotations(prev => ({ ...prev }));
+    }
+  }, [textLayerRef.current, uploadedFileName, currentPage]);
 
   const onDocumentLoadSuccess = ({ numPages }) => {
     console.log('✅ PDF loaded successfully:', { 
@@ -448,8 +490,8 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
         coordinates.push(finalCoords);
       }
       
-      // Normalize coordinates to PDF-intrinsic system
-      const normalizedCoords = normalizeCoordinates(coordinates, pageContainer);
+      // Normalize coordinates to text layer system (zoom-independent)
+      const normalizedCoords = normalizeCoordinates(coordinates, textLayerRef.current);
       
       return normalizedCoords && normalizedCoords.length > 0 ? normalizedCoords : null;
     } catch (error) {
@@ -515,11 +557,14 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     
     setIsAnalyzing(true);
     
+    // Show thinking toast
+    showToast('🧠 AI is analyzing the page for highlights...', 'info', 0); // 0 duration means it won't auto-dismiss
+    
     try {
       const pageText = extractPageText();
       
       if (!pageText || pageText.length < 50) {
-        alert('Not enough text on this page for AI analysis. Please try a page with more content.');
+        showToast('❌ Not enough text on this page for AI analysis', 'error', 4000);
         return;
       }
 
@@ -537,15 +582,19 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       const result = await response.json();
 
       if (result.success) {
+        const suggestionCount = result.analysis.suggestions?.length || 0;
         setAiSuggestions(result.analysis.suggestions || []);
         setAiSuggestionsVisible(true);
-        console.log('AI analysis completed:', result.analysis.suggestions?.length || 0, 'suggestions');
+        
+        // Show success toast
+        showToast(`✅ AI found ${suggestionCount} highlight suggestions!`, 'success', 3000);
+        console.log('AI analysis completed:', suggestionCount, 'suggestions');
       } else {
         throw new Error(result.error || 'Failed to analyze page');
       }
     } catch (error) {
       console.error('AI analysis error:', error);
-      alert('Failed to analyze page for highlights. Please try again.');
+      showToast('❌ Failed to analyze page for highlights. Please try again.', 'error', 4000);
     } finally {
       setIsAnalyzing(false);
     }
@@ -1149,16 +1198,21 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
   const renderAnnotations = () => {
     const pageKey = `page-${currentPage}`;
     const pageAnnotations = annotations[pageKey] || [];
-    const pageContainer = pageRef.current;
+    
+    // Validate text layer availability for coordinate calculations
+    if (!textLayerRef.current) {
+      console.warn('Text layer not available for annotation rendering');
+      return [];
+    }
 
     return pageAnnotations.map(annotation => {
       switch (annotation.type) {
         case 'highlight':
           // Handle both text-selection-based and legacy click-based highlights
           if (annotation.isTextSelection && annotation.coordinates) {
-            // Denormalize coordinates for current page state
+            // Denormalize coordinates using current text layer dimensions
             const displayCoords = annotation.coordinates[0]?.x <= 1 ? 
-              denormalizeCoordinates(annotation.coordinates, pageContainer) : 
+              denormalizeCoordinates(annotation.coordinates) : 
               annotation.coordinates; // Fallback for legacy coordinates
 
             return displayCoords.map((coord, index) => (
@@ -1318,9 +1372,9 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
         case 'underline':
           // Handle both text-selection-based and legacy click-based underlines
           if (annotation.isTextSelection && annotation.coordinates) {
-            // Denormalize coordinates for current page state
+            // Denormalize coordinates using current text layer dimensions
             const displayCoords = annotation.coordinates[0]?.x <= 1 ? 
-              denormalizeCoordinates(annotation.coordinates, pageContainer) : 
+              denormalizeCoordinates(annotation.coordinates) : 
               annotation.coordinates; // Fallback for legacy coordinates
 
             return displayCoords.map((coord, index) => (
@@ -1456,12 +1510,26 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
           <button
             onClick={toggleAiSuggestions}
             className={`toolbar-btn ai-suggest-btn ${aiSuggestionsVisible ? 'active' : ''} ${isAnalyzing ? 'analyzing' : ''}`}
-            title={isAnalyzing ? 'Analyzing page...' : aiSuggestions.length > 0 ? 'Toggle AI suggestions' : 'AI suggest highlights'}
+            title={isAnalyzing ? '🧠 AI is thinking...' : aiSuggestions.length > 0 ? 'Toggle AI suggestions' : 'AI suggest highlights'}
             disabled={isAnalyzing}
           >
             <Brain size={20} />
-            {aiSuggestions.length > 0 && (
+            {aiSuggestions.length > 0 && !isAnalyzing && (
               <span className="suggestion-count">{aiSuggestions.length}</span>
+            )}
+            {isAnalyzing && (
+              <span className="analyzing-text" style={{ 
+                fontSize: '10px', 
+                position: 'absolute', 
+                bottom: '-2px', 
+                left: '50%', 
+                transform: 'translateX(-50%)', 
+                whiteSpace: 'nowrap',
+                color: 'currentColor',
+                fontWeight: 'bold'
+              }}>
+                Thinking...
+              </span>
             )}
           </button>
           
@@ -1571,7 +1639,16 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
                   const textLayer = pageRef.current?.querySelector('.react-pdf__Page__textContent');
                   if (textLayer) {
                     textLayerRef.current = textLayer;
-                    console.log('Text layer reference updated for page', currentPage);
+                    console.log('Text layer reference updated for page', currentPage, 'at scale', scale);
+                    
+                    // Trigger annotation repositioning after text layer is ready
+                    setTimeout(() => {
+                      if (uploadedFileName && currentPage) {
+                        console.log('Triggering annotation repositioning after text layer setup');
+                        setAnnotations(prev => ({ ...prev }));
+                      }
+                    }, 50);
+                    
                     return true;
                   }
                   return false;
