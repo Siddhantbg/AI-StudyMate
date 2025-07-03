@@ -44,6 +44,25 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
   const [stickyNoteModal, setStickyNoteModal] = useState(null);
   const [stickyNoteContent, setStickyNoteContent] = useState('');
   const [stickyNoteAttachments, setStickyNoteAttachments] = useState([]);
+  const [drawingColor, setDrawingColor] = useState('#2196f3');
+  const [showColorPalette, setShowColorPalette] = useState(false);
+  const [paletteOpenUpward, setPaletteOpenUpward] = useState(false);
+  
+  // Drawing color palette
+  const drawingColors = [
+    '#2196f3', // Blue (default)
+    '#f44336', // Red
+    '#4caf50', // Green
+    '#ff9800', // Orange
+    '#9c27b0', // Purple
+    '#000000', // Black
+    '#795548', // Brown
+    '#607d8b', // Blue Grey
+    '#e91e63', // Pink
+    '#ffeb3b', // Yellow
+    '#00bcd4', // Cyan
+    '#8bc34a'  // Light Green
+  ];
   const pageRef = useRef(null);
   const textLayerRef = useRef(null);
   const pageInputRef = useRef(null);
@@ -110,6 +129,120 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       width: coord.width * textLayerWidth,
       height: coord.height * textLayerHeight
     }));
+  };
+
+  // Normalize drawing path coordinates relative to text layer
+  const normalizeDrawingPath = (path, textLayer) => {
+    if (!path || !textLayer) return path;
+    
+    const textLayerRect = textLayer.getBoundingClientRect();
+    const textLayerWidth = textLayerRect.width;
+    const textLayerHeight = textLayerRect.height;
+    
+    // Validate text layer dimensions
+    if (textLayerWidth <= 0 || textLayerHeight <= 0) {
+      console.warn('Invalid text layer dimensions for drawing:', { textLayerWidth, textLayerHeight });
+      return path;
+    }
+    
+    return path.map(point => ({
+      // Normalize to text layer dimensions (zoom-independent)
+      x: point.x / textLayerWidth,
+      y: point.y / textLayerHeight,
+      // Store metadata for debugging
+      _originalX: point.x,
+      _originalY: point.y,
+      _textLayerWidth: textLayerWidth,
+      _textLayerHeight: textLayerHeight,
+      _scaleAtCreation: scale
+    }));
+  };
+
+  // Denormalize drawing path coordinates for display
+  const denormalizeDrawingPath = (normalizedPath) => {
+    if (!normalizedPath || !textLayerRef.current) return normalizedPath;
+    
+    const currentTextLayer = textLayerRef.current;
+    const textLayerRect = currentTextLayer.getBoundingClientRect();
+    const textLayerWidth = textLayerRect.width;
+    const textLayerHeight = textLayerRect.height;
+    
+    // Validate current text layer dimensions
+    if (textLayerWidth <= 0 || textLayerHeight <= 0) {
+      console.warn('Invalid current text layer dimensions for drawing:', { textLayerWidth, textLayerHeight });
+      return normalizedPath;
+    }
+    
+    return normalizedPath.map(point => ({
+      // Apply current text layer dimensions to normalized coordinates
+      x: point.x * textLayerWidth,
+      y: point.y * textLayerHeight
+    }));
+  };
+
+  // Check if color palette should open upward to prevent cutoff
+  const shouldPaletteOpenUpward = () => {
+    const paletteHeight = 120; // Approximate height of color palette (3 rows × ~30px + padding)
+    const viewportHeight = window.innerHeight;
+    
+    // Get the position of the drawing tool button to calculate available space below
+    const drawingButton = document.querySelector('.toolbar-btn[title="Draw"]');
+    if (!drawingButton) return false;
+    
+    const buttonRect = drawingButton.getBoundingClientRect();
+    const spaceBelow = viewportHeight - buttonRect.bottom;
+    
+    // If there's not enough space below, open upward
+    return spaceBelow < paletteHeight;
+  };
+
+  // Normalize sticky note coordinates relative to text layer
+  const normalizeStickyNoteCoordinates = (x, y, textLayer) => {
+    if (!textLayer) return { x, y };
+    
+    const textLayerRect = textLayer.getBoundingClientRect();
+    const textLayerWidth = textLayerRect.width;
+    const textLayerHeight = textLayerRect.height;
+    
+    // Validate text layer dimensions
+    if (textLayerWidth <= 0 || textLayerHeight <= 0) {
+      console.warn('Invalid text layer dimensions for sticky note:', { textLayerWidth, textLayerHeight });
+      return { x, y };
+    }
+    
+    return {
+      // Normalize to text layer dimensions (zoom-independent)
+      x: x / textLayerWidth,
+      y: y / textLayerHeight,
+      // Store metadata for debugging
+      _originalX: x,
+      _originalY: y,
+      _textLayerWidth: textLayerWidth,
+      _textLayerHeight: textLayerHeight,
+      _scaleAtCreation: scale
+    };
+  };
+
+  // Denormalize sticky note coordinates for display
+  const denormalizeStickyNoteCoordinates = (normalizedCoords) => {
+    if (!normalizedCoords || !textLayerRef.current) return normalizedCoords;
+    
+    const currentTextLayer = textLayerRef.current;
+    const textLayerRect = currentTextLayer.getBoundingClientRect();
+    const textLayerWidth = textLayerRect.width;
+    const textLayerHeight = textLayerRect.height;
+    
+    // Validate current text layer dimensions
+    if (textLayerWidth <= 0 || textLayerHeight <= 0) {
+      console.warn('Invalid current text layer dimensions for sticky note:', { textLayerWidth, textLayerHeight });
+      return normalizedCoords;
+    }
+    
+    return {
+      // Apply current text layer dimensions to normalized coordinates
+      x: normalizedCoords.x * textLayerWidth,
+      y: normalizedCoords.y * textLayerHeight
+    };
   };
 
   // Enhanced coordinate calculation with PDF-intrinsic normalization
@@ -259,7 +392,6 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     if (textLayerRef.current && uploadedFileName && currentPage) {
       console.log('Text layer updated - refreshing annotation positions');
       // Force re-render with current annotations
-      const pageKey = `page-${currentPage}`;
       setAnnotations(prev => ({ ...prev }));
     }
   }, [textLayerRef.current, uploadedFileName, currentPage]);
@@ -828,17 +960,32 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     const pageKey = `page-${currentPage}`;
     
     if (stickyNoteModal.isNew) {
+      // Normalize coordinates relative to text layer
+      const normalizedCoords = textLayerRef.current ? 
+        normalizeStickyNoteCoordinates(stickyNoteModal.originalX, stickyNoteModal.originalY, textLayerRef.current) : 
+        { x: stickyNoteModal.originalX, y: stickyNoteModal.originalY }; // Fallback to raw coordinates if text layer not available
+      
       // Create new sticky note
       const newStickyNote = {
         id: Date.now(),
         type: 'stickynote',
-        x: stickyNoteModal.originalX,
-        y: stickyNoteModal.originalY,
+        // Use normalized coordinates if available, otherwise raw coordinates for backward compatibility
+        x: normalizedCoords.x,
+        y: normalizedCoords.y,
         content: stickyNoteContent,
         attachments: stickyNoteAttachments,
         color: '#fbbf24', // Yellow sticky note color
         createdAt: new Date().toISOString(),
-        modifiedAt: new Date().toISOString()
+        modifiedAt: new Date().toISOString(),
+        // Enhanced metadata for coordinate stability
+        metadata: {
+          page: currentPage,
+          scale: scale,
+          rotation: rotation,
+          coordinateVersion: '2.0',
+          isNormalized: !!textLayerRef.current,
+          _normalizedCoords: normalizedCoords
+        }
       };
 
       setAnnotations(prev => ({
@@ -846,7 +993,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
         [pageKey]: [...(prev[pageKey] || []), newStickyNote]
       }));
     } else {
-      // Update existing sticky note
+      // Update existing sticky note (don't change coordinates, just content)
       setAnnotations(prev => ({
         ...prev,
         [pageKey]: (prev[pageKey] || []).map(annotation => 
@@ -871,19 +1018,38 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     setStickyNoteAttachments([]);
   };
 
-  // Handle Escape key to close modal
+  // Handle Escape key to close modal and color palette
   useEffect(() => {
     const handleKeyDown = (event) => {
-      if (event.key === 'Escape' && stickyNoteModal) {
-        closeStickyNoteModal();
+      if (event.key === 'Escape') {
+        if (stickyNoteModal) {
+          closeStickyNoteModal();
+        }
+        if (showColorPalette) {
+          setShowColorPalette(false);
+        }
       }
     };
 
-    if (stickyNoteModal) {
+    if (stickyNoteModal || showColorPalette) {
       document.addEventListener('keydown', handleKeyDown);
       return () => document.removeEventListener('keydown', handleKeyDown);
     }
-  }, [stickyNoteModal]);
+  }, [stickyNoteModal, showColorPalette]);
+
+  // Handle click outside to close color palette
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showColorPalette && !event.target.closest('.drawing-color-palette')) {
+        setShowColorPalette(false);
+      }
+    };
+
+    if (showColorPalette) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showColorPalette]);
 
   const handleFileAttachment = (event) => {
     const files = Array.from(event.target.files);
@@ -1010,10 +1176,11 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     const annotationToRemove = findAnnotationAtPosition(x, y, pageAnnotations);
     
     if (annotationToRemove) {
-      removeAnnotation(annotationToRemove.id);
+      removeAnnotation(annotationToRemove.id, true); // Explicitly show success message
       // Visual feedback for successful erase
       console.log('Annotation erased:', annotationToRemove.type);
     }
+    // No else clause - don't show success message if no annotation found
   };
 
   // Find annotation at specific position with enhanced precision
@@ -1037,6 +1204,23 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       } else if (annotation.type === 'comment') {
         // Enhanced detection for comment annotations with tolerance
         if (isPointInRectangleWithTolerance(x, y, annotation, 10)) {
+          return annotation;
+        }
+      } else if (annotation.type === 'stickynote') {
+        // Handle both normalized and legacy sticky note coordinates for eraser detection
+        const coords = annotation.metadata?.isNormalized ? 
+          denormalizeStickyNoteCoordinates({ x: annotation.x, y: annotation.y }) : 
+          { x: annotation.x, y: annotation.y };
+        
+        // Create a rectangle approximation for sticky note bounds (150px min width, ~80px estimated height)
+        const stickyRect = {
+          x: coords.x,
+          y: coords.y,
+          width: 150, // minWidth from CSS
+          height: 80  // Estimated height for header + content
+        };
+        
+        if (isPointInRectangleWithTolerance(x, y, stickyRect, 10)) {
           return annotation;
         }
       } else {
@@ -1086,7 +1270,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
   };
 
   // Remove annotation by ID with visual feedback
-  const removeAnnotation = (annotationId) => {
+  const removeAnnotation = (annotationId, showSuccessMessage = true) => {
     const pageKey = `page-${currentPage}`;
     
     // Show visual feedback before removing
@@ -1110,8 +1294,10 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       }));
     }
     
-    // Show success feedback
-    showEraseSuccessMessage();
+    // Show success feedback only if requested
+    if (showSuccessMessage) {
+      showEraseSuccessMessage();
+    }
   };
 
   // Show success message for erasing
@@ -1126,7 +1312,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
   const handleAnnotationClick = (event, annotationId) => {
     if (activeAnnotationTool === 'erase') {
       event.stopPropagation(); // Prevent event bubbling to page container
-      removeAnnotation(annotationId);
+      removeAnnotation(annotationId, true); // Show success message for direct clicks
       console.log('Annotation erased via direct click:', annotationId);
     }
   };
@@ -1157,12 +1343,28 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     setIsDrawing(false);
     if (drawingPath.length > 1) {
       const pageKey = `page-${currentPage}`;
+      
+      // Normalize drawing coordinates relative to text layer
+      const normalizedPath = textLayerRef.current ? 
+        normalizeDrawingPath(drawingPath, textLayerRef.current) : 
+        drawingPath; // Fallback to raw coordinates if text layer not available
+      
       const newDrawing = {
         id: Date.now(),
         type: 'drawing',
-        path: [...drawingPath],
-        color: '#2196f3',
-        strokeWidth: 2
+        path: normalizedPath,
+        color: drawingColor,
+        strokeWidth: 2,
+        // Enhanced metadata for coordinate stability
+        metadata: {
+          createdAt: new Date().toISOString(),
+          page: currentPage,
+          scale: scale,
+          rotation: rotation,
+          pathLength: drawingPath.length,
+          coordinateVersion: '2.0',
+          isNormalized: !!textLayerRef.current
+        }
       };
 
       setAnnotations(prev => ({
@@ -1283,7 +1485,12 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
               💬 {annotation.text.substring(0, 20)}...
             </div>
           );
-        case 'stickynote':
+        case 'stickynote': {
+          // Handle both normalized and legacy sticky note coordinates
+          const displayCoords = annotation.metadata?.isNormalized ? 
+            denormalizeStickyNoteCoordinates({ x: annotation.x, y: annotation.y }) : 
+            { x: annotation.x, y: annotation.y }; // Fallback for legacy sticky notes
+          
           return (
             <div
               key={annotation.id}
@@ -1291,8 +1498,8 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
               data-annotation-id={annotation.id}
               style={{
                 position: 'absolute',
-                left: annotation.x,
-                top: annotation.y,
+                left: displayCoords.x,
+                top: displayCoords.y,
                 backgroundColor: annotation.color,
                 color: '#333',
                 padding: '8px',
@@ -1314,10 +1521,10 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
                   // Open sticky note for editing
                   e.stopPropagation();
                   setStickyNoteModal({
-                    x: annotation.x,
-                    y: annotation.y,
-                    originalX: annotation.x,
-                    originalY: annotation.y,
+                    x: displayCoords.x,
+                    y: displayCoords.y,
+                    originalX: displayCoords.x,
+                    originalY: displayCoords.y,
                     isNew: false,
                     annotationId: annotation.id
                   });
@@ -1341,7 +1548,13 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
               </div>
             </div>
           );
-        case 'drawing':
+        }
+        case 'drawing': {
+          // Handle both normalized and legacy drawing coordinates
+          const drawingPath = annotation.metadata?.isNormalized ? 
+            denormalizeDrawingPath(annotation.path) : 
+            annotation.path; // Fallback for legacy drawings
+          
           return (
             <svg
               key={annotation.id}
@@ -1360,7 +1573,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
               onClick={(e) => handleAnnotationClick(e, annotation.id)}
             >
               <polyline
-                points={annotation.path.map(p => `${p.x},${p.y}`).join(' ')}
+                points={drawingPath.map(p => `${p.x},${p.y}`).join(' ')}
                 fill="none"
                 stroke={annotation.color}
                 strokeWidth={annotation.strokeWidth}
@@ -1369,6 +1582,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
               />
             </svg>
           );
+        }
         case 'underline':
           // Handle both text-selection-based and legacy click-based underlines
           if (annotation.isTextSelection && annotation.coordinates) {
@@ -1572,6 +1786,58 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
           >
             <Pencil size={20} />
           </button>
+          
+          {/* Color Palette for Drawing Tool */}
+          {activeAnnotationTool === 'draw' && (
+            <div className="drawing-color-palette">
+              <button
+                onClick={() => {
+                  if (!showColorPalette) {
+                    // Check positioning before opening
+                    const openUpward = shouldPaletteOpenUpward();
+                    setPaletteOpenUpward(openUpward);
+                  }
+                  setShowColorPalette(!showColorPalette);
+                }}
+                className="color-palette-trigger"
+                title="Choose drawing color"
+                style={{
+                  backgroundColor: drawingColor,
+                  border: '2px solid #fff',
+                  borderRadius: '50%',
+                  width: '24px',
+                  height: '24px',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                }}
+              />
+              {showColorPalette && (
+                <div className={`color-palette-dropdown ${paletteOpenUpward ? 'upward' : 'downward'}`}>
+                  {drawingColors.map((color, index) => (
+                    <button
+                      key={index}
+                      onClick={() => {
+                        setDrawingColor(color);
+                        setShowColorPalette(false);
+                      }}
+                      className={`color-option ${drawingColor === color ? 'selected' : ''}`}
+                      style={{
+                        backgroundColor: color,
+                        border: drawingColor === color ? '2px solid #fff' : '1px solid #ccc',
+                        borderRadius: '50%',
+                        width: '20px',
+                        height: '20px',
+                        cursor: 'pointer',
+                        margin: '2px',
+                        boxShadow: drawingColor === color ? '0 0 0 2px #2196f3' : '0 1px 2px rgba(0,0,0,0.1)'
+                      }}
+                      title={`Select ${color}`}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           
           <button
             onClick={() => setActiveAnnotationTool(
@@ -2016,7 +2282,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
               <polyline
                 points={drawingPath.map(p => `${p.x},${p.y}`).join(' ')}
                 fill="none"
-                stroke="#2196f3"
+                stroke={drawingColor}
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
