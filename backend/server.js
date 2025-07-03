@@ -85,9 +85,20 @@ app.get('/api/files/:filename', (req, res) => {
         const filename = req.params.filename;
         const filePath = path.join(__dirname, 'uploads', filename);
         
-        // Check if file exists
+        console.log(`Attempting to serve file: ${filename}`);
+        console.log(`File path: ${filePath}`);
+        console.log(`File exists: ${fs.existsSync(filePath)}`);
+        
+        // List all files in uploads directory for debugging
         if (!fs.existsSync(filePath)) {
-            return res.status(404).json({ error: 'File not found' });
+            const uploadsDir = path.join(__dirname, 'uploads');
+            const availableFiles = fs.readdirSync(uploadsDir);
+            console.log(`Available files in uploads:`, availableFiles);
+            return res.status(404).json({ 
+                error: 'File not found',
+                requestedFile: filename,
+                availableFiles: availableFiles
+            });
         }
         
         // Set proper headers for PDF
@@ -134,7 +145,7 @@ app.get('/api/files', (req, res) => {
                 return {
                     id: filename, // Use filename as ID for server files
                     fileName: originalName,
-                    uploadedFileName: filename,
+                    uploadedFileName: filename, // This must match the actual filename in uploads/
                     fileSize: stats.size,
                     fileType: 'application/pdf',
                     uploadDate: stats.mtime.toISOString(),

@@ -53,34 +53,47 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     withCredentials: false
   }), []);
 
-  // Text selection handling
-  useEffect(() => {
-    const handleSelectionChange = () => {
-      const selection = window.getSelection();
-      if (selection.rangeCount > 0 && !selection.isCollapsed) {
-        const range = selection.getRangeAt(0);
-        const selectedTextContent = selection.toString();
-        
-        // Check if selection is within the PDF text layer
-        const textLayer = textLayerRef.current;
-        if (textLayer && textLayer.contains(range.commonAncestorContainer)) {
-          const coords = getSelectionCoordinates(range, textLayer);
-          setSelectedText(selectedTextContent);
-          setSelectionCoords(coords);
-        }
-      } else {
-        setSelectedText(null);
-        setSelectionCoords(null);
-      }
-    };
+  // PDF-intrinsic coordinate normalization functions
+  const normalizeCoordinates = (coordinates, pageContainer) => {
+    if (!coordinates || !pageContainer) return coordinates;
+    
+    const pageRect = pageContainer.getBoundingClientRect();
+    const pageWidth = pageRect.width;
+    const pageHeight = pageRect.height;
+    
+    return coordinates.map(coord => ({
+      x: coord.x / pageWidth,
+      y: coord.y / pageHeight,
+      width: coord.width / pageWidth,
+      height: coord.height / pageHeight,
+      // Store original pixel coordinates for debugging
+      _originalX: coord.x,
+      _originalY: coord.y,
+      _originalWidth: coord.width,
+      _originalHeight: coord.height,
+      _pageWidth: pageWidth,
+      _pageHeight: pageHeight,
+      _scale: scale,
+      _rotation: rotation
+    }));
+  };
 
-    document.addEventListener('selectionchange', handleSelectionChange);
-    return () => {
-      document.removeEventListener('selectionchange', handleSelectionChange);
-    };
-  }, [currentPage]);
+  const denormalizeCoordinates = (normalizedCoords, pageContainer) => {
+    if (!normalizedCoords || !pageContainer) return normalizedCoords;
+    
+    const pageRect = pageContainer.getBoundingClientRect();
+    const pageWidth = pageRect.width;
+    const pageHeight = pageRect.height;
+    
+    return normalizedCoords.map(coord => ({
+      x: coord.x * pageWidth,
+      y: coord.y * pageHeight,
+      width: coord.width * pageWidth,
+      height: coord.height * pageHeight
+    }));
+  };
 
-  // Enhanced coordinate calculation with viewport transformations
+  // Enhanced coordinate calculation with PDF-intrinsic normalization
   const getSelectionCoordinates = (range, textLayer) => {
     try {
       const rects = range.getClientRects();
@@ -120,7 +133,10 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
         coordinates.push(finalCoords);
       }
       
-      return coordinates.length > 0 ? coordinates : null;
+      // Normalize coordinates to PDF-intrinsic system
+      const normalizedCoords = normalizeCoordinates(coordinates, pageContainer);
+      
+      return normalizedCoords && normalizedCoords.length > 0 ? normalizedCoords : null;
     } catch (error) {
       console.warn('Error getting selection coordinates:', error);
       return null;
@@ -153,6 +169,33 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     };
   };
 
+  // Text selection handling
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const selection = window.getSelection();
+      if (selection.rangeCount > 0 && !selection.isCollapsed) {
+        const range = selection.getRangeAt(0);
+        const selectedTextContent = selection.toString();
+        
+        // Check if selection is within the PDF text layer
+        const textLayer = textLayerRef.current;
+        if (textLayer && textLayer.contains(range.commonAncestorContainer)) {
+          const coords = getSelectionCoordinates(range, textLayer);
+          setSelectedText(selectedTextContent);
+          setSelectionCoords(coords);
+        }
+      } else {
+        setSelectedText(null);
+        setSelectionCoords(null);
+      }
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, [currentPage]);
+
   // Annotation persistence functions
   const saveAnnotations = (pageAnnotations, filename, page) => {
     if (!filename) return;
@@ -167,17 +210,6 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     return saved ? JSON.parse(saved) : [];
   };
 
-  // Load annotations when page or file changes
-  useEffect(() => {
-    if (uploadedFileName && currentPage) {
-      const savedAnnotations = loadAnnotations(uploadedFileName, currentPage);
-      const pageKey = `page-${currentPage}`;
-      setAnnotations(prev => ({
-        ...prev,
-        [pageKey]: savedAnnotations
-      }));
-    }
-  }, [uploadedFileName, currentPage]);
 
   // Save annotations when they change
   useEffect(() => {
@@ -382,12 +414,13 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     return null;
   };
 
-  // Get coordinates for text elements (supports single or multiple elements)
+  // Get coordinates for text elements with normalization (supports single or multiple elements)
   const getTextElementCoordinates = (foundTextData) => {
     if (!foundTextData || !foundTextData.elements || !textLayerRef.current) return null;
     
     try {
       const textLayerRect = textLayerRef.current.getBoundingClientRect();
+      const pageContainer = pageRef.current;
       const coordinates = [];
       
       // Process each element to get coordinates
@@ -409,18 +442,73 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
         
         // Apply rotation transformation if needed
         if (rotation !== 0) {
-          finalCoords = applyRotationToCoords(finalCoords, rotation, pageRef.current);
+          finalCoords = applyRotationToCoords(finalCoords, rotation, pageContainer);
         }
         
         coordinates.push(finalCoords);
       }
       
-      return coordinates.length > 0 ? coordinates : null;
+      // Normalize coordinates to PDF-intrinsic system
+      const normalizedCoords = normalizeCoordinates(coordinates, pageContainer);
+      
+      return normalizedCoords && normalizedCoords.length > 0 ? normalizedCoords : null;
     } catch (error) {
       console.warn('Error getting text element coordinates:', error);
       return null;
     }
   };
+
+  // Coordinate validation and recovery system
+  const validateAndRecoverCoordinates = (annotation) => {
+    if (!annotation.isTextSelection || !annotation.text || !annotation.coordinates) {
+      return annotation; // Skip validation for non-text annotations
+    }
+
+    // Check if coordinates seem reasonable (normalized values should be 0-1)
+    const hasNormalizedCoords = annotation.coordinates.every(coord => 
+      coord.x >= 0 && coord.x <= 1 && coord.y >= 0 && coord.y <= 1
+    );
+
+    if (hasNormalizedCoords) {
+      return annotation; // Coordinates look good
+    }
+
+    // Attempt recovery using text content matching
+    console.warn('Invalid coordinates detected for annotation, attempting recovery:', annotation.id);
+    
+    const foundText = findTextInPDFLayer(annotation.text);
+    if (foundText && foundText.elements && foundText.elements.length > 0) {
+      const recoveredCoords = getTextElementCoordinates(foundText);
+      if (recoveredCoords) {
+        console.log('Successfully recovered coordinates for annotation:', annotation.id);
+        return {
+          ...annotation,
+          coordinates: recoveredCoords,
+          _recovered: true,
+          _recoveryTime: new Date().toISOString()
+        };
+      }
+    }
+
+    console.warn('Could not recover coordinates for annotation:', annotation.id);
+    return annotation; // Return as-is if recovery failed
+  };
+
+  // Load annotations when page or file changes with validation
+  useEffect(() => {
+    if (uploadedFileName && currentPage) {
+      const savedAnnotations = loadAnnotations(uploadedFileName, currentPage);
+      
+      // Validate and recover coordinates if needed
+      const validatedAnnotations = savedAnnotations.map(validateAndRecoverCoordinates);
+      
+      const pageKey = `page-${currentPage}`;
+      setAnnotations(prev => ({
+        ...prev,
+        [pageKey]: validatedAnnotations
+      }));
+    }
+  }, [uploadedFileName, currentPage]);
 
   const analyzePageForHighlights = async () => {
     if (!uploadedFileName || isAnalyzing) return;
@@ -480,7 +568,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       const coordinates = getTextElementCoordinates(foundText);
       
       if (coordinates && coordinates.length > 0) {
-        // Create AI highlight with accurate positioning
+        // Create AI highlight with accurate positioning and metadata
         const aiHighlight = {
           id: Date.now() + index,
           type: 'highlight',
@@ -493,7 +581,18 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
           isTextSelection: true, // Mark as text-based highlighting
           coordinates: coordinates, // Use coordinates array from text elements
           foundText: foundText.text, // Store the actual found text
-          isMultiLine: foundText.isMultiLine // Track if spans multiple lines
+          isMultiLine: foundText.isMultiLine, // Track if spans multiple lines
+          // Enhanced metadata for coordinate stability
+          metadata: {
+            createdAt: new Date().toISOString(),
+            page: currentPage,
+            scale: scale,
+            rotation: rotation,
+            textLength: suggestion.text.length,
+            coordinateVersion: '2.0',
+            textChecksum: suggestion.text.length.toString(36),
+            isAIGenerated: true
+          }
         };
 
         const pageKey = `page-${currentPage}`;
@@ -587,7 +686,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     }
   };
 
-  // Create highlight based on text selection
+  // Create highlight based on text selection with enhanced metadata
   const createTextSelectionHighlight = () => {
     if (!selectedText || !selectionCoords) return;
     
@@ -598,7 +697,17 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       text: selectedText,
       coordinates: selectionCoords,
       color: '#ffff00',
-      isTextSelection: true
+      isTextSelection: true,
+      // Enhanced metadata for coordinate stability
+      metadata: {
+        createdAt: new Date().toISOString(),
+        page: currentPage,
+        scale: scale,
+        rotation: rotation,
+        textLength: selectedText.length,
+        coordinateVersion: '2.0', // Version for future compatibility
+        textChecksum: selectedText.length.toString(36) // Simple checksum for validation
+      }
     };
 
     setAnnotations(prev => ({
@@ -798,7 +907,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     }
   };
 
-  // Create underline based on text selection
+  // Create underline based on text selection with enhanced metadata
   const createTextSelectionUnderline = () => {
     if (!selectedText || !selectionCoords) return;
     
@@ -813,7 +922,17 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
         height: 2 // Thinner underline
       })),
       color: '#dc2626',
-      isTextSelection: true
+      isTextSelection: true,
+      // Enhanced metadata for coordinate stability
+      metadata: {
+        createdAt: new Date().toISOString(),
+        page: currentPage,
+        scale: scale,
+        rotation: rotation,
+        textLength: selectedText.length,
+        coordinateVersion: '2.0',
+        textChecksum: selectedText.length.toString(36)
+      }
     };
 
     setAnnotations(prev => ({
@@ -1030,13 +1149,19 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
   const renderAnnotations = () => {
     const pageKey = `page-${currentPage}`;
     const pageAnnotations = annotations[pageKey] || [];
+    const pageContainer = pageRef.current;
 
     return pageAnnotations.map(annotation => {
       switch (annotation.type) {
         case 'highlight':
           // Handle both text-selection-based and legacy click-based highlights
           if (annotation.isTextSelection && annotation.coordinates) {
-            return annotation.coordinates.map((coord, index) => (
+            // Denormalize coordinates for current page state
+            const displayCoords = annotation.coordinates[0]?.x <= 1 ? 
+              denormalizeCoordinates(annotation.coordinates, pageContainer) : 
+              annotation.coordinates; // Fallback for legacy coordinates
+
+            return displayCoords.map((coord, index) => (
               <div
                 key={`${annotation.id}-${index}`}
                 className={`annotation highlight-annotation ${annotation.isAISuggested ? 'ai-suggested' : ''}`}
@@ -1193,7 +1318,12 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
         case 'underline':
           // Handle both text-selection-based and legacy click-based underlines
           if (annotation.isTextSelection && annotation.coordinates) {
-            return annotation.coordinates.map((coord, index) => (
+            // Denormalize coordinates for current page state
+            const displayCoords = annotation.coordinates[0]?.x <= 1 ? 
+              denormalizeCoordinates(annotation.coordinates, pageContainer) : 
+              annotation.coordinates; // Fallback for legacy coordinates
+
+            return displayCoords.map((coord, index) => (
               <div
                 key={`${annotation.id}-${index}`}
                 className="annotation underline-annotation"
@@ -1436,13 +1566,26 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
               renderTextLayer={true}
               renderAnnotationLayer={true}
               onGetTextSuccess={() => {
-                // Store reference to text layer for selection detection
-                setTimeout(() => {
+                // Enhanced text layer reference management with proper timing
+                const setupTextLayer = () => {
                   const textLayer = pageRef.current?.querySelector('.react-pdf__Page__textContent');
                   if (textLayer) {
                     textLayerRef.current = textLayer;
+                    console.log('Text layer reference updated for page', currentPage);
+                    return true;
                   }
-                }, 100);
+                  return false;
+                };
+
+                // Try immediate setup
+                if (!setupTextLayer()) {
+                  // Fallback with timeout for delayed rendering
+                  setTimeout(() => {
+                    if (!setupTextLayer()) {
+                      console.warn('Text layer not found after timeout on page', currentPage);
+                    }
+                  }, 100);
+                }
               }}
             />
           </Document>
