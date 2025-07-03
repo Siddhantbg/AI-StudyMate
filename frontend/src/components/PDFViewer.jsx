@@ -642,6 +642,9 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
   const handleStickyNote = (event) => {
     if (activeAnnotationTool !== 'stickynote') return;
     
+    // Don't create new sticky notes if modal is already open
+    if (stickyNoteModal) return;
+    
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
@@ -709,6 +712,20 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     setStickyNoteContent('');
     setStickyNoteAttachments([]);
   };
+
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape' && stickyNoteModal) {
+        closeStickyNoteModal();
+      }
+    };
+
+    if (stickyNoteModal) {
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [stickyNoteModal]);
 
   const handleFileAttachment = (event) => {
     const files = Array.from(event.target.files);
@@ -1611,15 +1628,36 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
           
           {/* Sticky Note Modal */}
           {stickyNoteModal && (
-            <div className="sticky-note-modal-overlay">
-              <div className="sticky-note-modal" style={{
-                left: Math.min(stickyNoteModal.x, window.innerWidth - 400),
-                top: Math.min(stickyNoteModal.y + 20, window.innerHeight - 500)
-              }}>
+            <div 
+              className="sticky-note-modal-overlay"
+              onClick={(e) => {
+                // Only close if clicking on the overlay background, not the modal content
+                if (e.target === e.currentTarget) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  closeStickyNoteModal();
+                }
+              }}
+            >
+              <div 
+                className="sticky-note-modal" 
+                style={{
+                  left: Math.min(stickyNoteModal.x, window.innerWidth - 400),
+                  top: Math.min(stickyNoteModal.y + 20, window.innerHeight - 500)
+                }}
+                onClick={(e) => {
+                  // Prevent modal content clicks from bubbling to overlay
+                  e.stopPropagation();
+                }}
+              >
                 <div className="sticky-note-modal-header">
                   <h3>📝 {stickyNoteModal.isNew ? 'New' : 'Edit'} Sticky Note</h3>
                   <button 
-                    onClick={closeStickyNoteModal}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      closeStickyNoteModal();
+                    }}
                     className="modal-close-btn"
                     title="Close"
                   >
@@ -1716,14 +1754,22 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
                   
                   <div className="modal-actions">
                     <button 
-                      onClick={saveStickyNote}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        saveStickyNote();
+                      }}
                       className="save-btn"
                       disabled={!stickyNoteContent.trim() && stickyNoteAttachments.length === 0}
                     >
                       💾 Save Note
                     </button>
                     <button 
-                      onClick={closeStickyNoteModal}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        closeStickyNoteModal();
+                      }}
                       className="cancel-btn"
                     >
                       Cancel

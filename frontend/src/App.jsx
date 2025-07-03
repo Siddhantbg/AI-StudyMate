@@ -1,16 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Upload, FileText, Brain, HelpCircle, Focus, TreePine, Clock } from 'lucide-react';
+import { Upload, FileText, Brain, HelpCircle, Focus, TreePine, Clock, Edit } from 'lucide-react';
 import PDFViewer from './components/PDFViewer';
 import Sidebar from './components/Sidebar';
 import FocusMode from './components/FocusMode';
 import FileManager from './components/FileManager';
 import ThemeToggle from './components/ThemeToggle';
+import RenameModal from './components/RenameModal';
+import ToastContainer from './components/Toast';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { ToastProvider, useToast } from './contexts/ToastContext';
 import { saveFile } from './utils/fileStorage';
 import './styles/main-themes.css';
 import './styles/pdf-setup.css';
 
-function App() {
+function AppContent() {
+  const { showToast } = useToast();
   const [pdfFile, setPdfFile] = useState(null);
   const [uploadedFileName, setUploadedFileName] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -19,6 +23,7 @@ function App() {
   const [focusMode, setFocusMode] = useState(false);
   const [userInactive, setUserInactive] = useState(false);
   const [lastActivity, setLastActivity] = useState(Date.now());
+  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [pageTimer, setPageTimer] = useState(0);
 
   // Local storage helper functions for page timer (memoized to prevent re-creation)
@@ -176,12 +181,12 @@ function App() {
 
 const handleFileUpload = async (file) => {
   if (!file || file.type !== 'application/pdf') {
-    alert('Please upload a valid PDF file');
+    showToast('Please upload a valid PDF file', 'error');
     return;
   }
 
   if (file.size > 100 * 1024 * 1024) { // 100MB limit
-    alert('File size must be less than 100MB');
+    showToast('File size must be less than 100MB', 'error');
     return;
   }
 
@@ -211,9 +216,10 @@ const handleFileUpload = async (file) => {
       try {
         await saveFile(file, result.file.filename);
         console.log('File saved to local storage for future access');
+        showToast('PDF uploaded and saved successfully!', 'success');
       } catch (storageError) {
         console.warn('Failed to save file to local storage:', storageError);
-        // Don't fail the upload if storage fails
+        showToast('PDF uploaded but failed to save locally', 'warning');
       }
       
       console.log('File set for PDF viewer:', file);
@@ -222,7 +228,7 @@ const handleFileUpload = async (file) => {
     }
   } catch (error) {
     console.error('Upload error:', error);
-    alert('Failed to upload PDF: ' + error.message);
+    showToast('Failed to upload PDF: ' + error.message, 'error');
   } finally {
     setIsUploading(false);
   }
@@ -240,9 +246,10 @@ const handleFileLoad = (file, uploadedFileName, metadata) => {
     setTotalPages(0);
     
     console.log(`Loaded saved file: ${metadata.fileName}, resuming at page ${lastPage}`);
+    showToast(`Loaded ${metadata.fileName} - resumed at page ${lastPage}`, 'success');
   } catch (error) {
     console.error('Error loading saved file:', error);
-    alert('Error loading file: ' + error.message);
+    showToast('Error loading file: ' + error.message, 'error');
   }
 };
 
@@ -263,19 +270,101 @@ const handleFileLoad = (file, uploadedFileName, metadata) => {
     setLastActivity(Date.now());
   };
 
+  // Handle logo click navigation back to upload
+  const handleLogoClick = () => {
+    if (pdfFile) {
+      // Save current state before navigating away
+      if (uploadedFileName && currentPage) {
+        saveLastPage(uploadedFileName, currentPage);
+        savePageTimer(uploadedFileName, currentPage, pageTimer);
+      }
+      
+      // Clear PDF state to return to upload
+      setPdfFile(null);
+      setUploadedFileName('');
+      setCurrentPage(1);
+      setTotalPages(0);
+      setPageTimer(0);
+      
+      showToast('Returned to upload page', 'info', 2000);
+    }
+  };
+
+  // Handle PDF rename
+  const handleRename = async (newName) => {
+    if (!uploadedFileName) return;
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/files/rename`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          oldName: uploadedFileName,
+          newName: newName
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        const oldName = uploadedFileName;
+        setUploadedFileName(newName);
+        
+        // Update localStorage keys with new filename
+        const oldPageKey = getLastPageKey(oldName);
+        const newPageKey = getLastPageKey(newName);
+        const savedPage = localStorage.getItem(oldPageKey);
+        if (savedPage) {
+          localStorage.setItem(newPageKey, savedPage);
+          localStorage.removeItem(oldPageKey);
+        }
+
+        // Update timer keys
+        const oldTimerKey = getPageTimerKey(oldName, currentPage);
+        const newTimerKey = getPageTimerKey(newName, currentPage);
+        const savedTimer = localStorage.getItem(oldTimerKey);
+        if (savedTimer) {
+          localStorage.setItem(newTimerKey, savedTimer);
+          localStorage.removeItem(oldTimerKey);
+        }
+
+        showToast(`PDF renamed to "${newName}"`, 'success');
+      } else {
+        throw new Error(result.error || 'Rename failed');
+      }
+    } catch (error) {
+      console.error('Rename error:', error);
+      showToast('Failed to rename PDF: ' + error.message, 'error');
+      throw error; // Re-throw to handle in modal
+    }
+  };
+
   return (
     <ThemeProvider>
       <div className="app-container">
         {/* Header */}
         <header className="app-header">
           <div className="header-content">
-            <div className="logo-section">
+            <div className="logo-section" onClick={handleLogoClick} style={{ cursor: pdfFile ? 'pointer' : 'default' }}>
               <TreePine className="logo-icon" size={32} />
               <h1 className="app-title">Forest PDF Viewer</h1>
             </div>
             
             <div className="header-actions">
               <ThemeToggle />
+              
+              {pdfFile && (
+                <button
+                  className="rename-button"
+                  onClick={() => setIsRenameModalOpen(true)}
+                  title="Rename PDF"
+                >
+                  <Edit size={20} />
+                  Rename
+                </button>
+              )}
               
               <button
                 className={`focus-toggle ${focusMode ? 'active' : ''}`}
@@ -368,6 +457,14 @@ const handleFileLoad = (file, uploadedFileName, metadata) => {
         )}
       </div>
 
+      {/* Rename Modal */}
+      <RenameModal
+        isOpen={isRenameModalOpen}
+        onClose={() => setIsRenameModalOpen(false)}
+        currentName={uploadedFileName}
+        onRename={handleRename}
+      />
+
       {/* Focus Mode Overlay */}
       {focusMode && userInactive && (
         <FocusMode onDismiss={dismissInactivity} />
@@ -384,6 +481,15 @@ const handleFileLoad = (file, uploadedFileName, metadata) => {
       )}
       </div>
     </ThemeProvider>
+  );
+}
+
+function App() {
+  return (
+    <ToastProvider>
+      <AppContent />
+      <ToastContainer />
+    </ToastProvider>
   );
 }
 

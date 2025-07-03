@@ -152,6 +152,74 @@ app.get('/api/files', (req, res) => {
     }
 });
 
+// Rename uploaded file endpoint
+app.post('/api/files/rename', (req, res) => {
+    try {
+        const { oldName, newName } = req.body;
+        
+        if (!oldName || !newName) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Both oldName and newName are required' 
+            });
+        }
+
+        // Validate new name
+        if (!newName.toLowerCase().endsWith('.pdf')) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'New name must end with .pdf extension' 
+            });
+        }
+
+        // Check for invalid characters
+        const invalidChars = /[<>:"/\\|?*]/;
+        if (invalidChars.test(newName)) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'File name contains invalid characters' 
+            });
+        }
+
+        const uploadsDir = path.join(__dirname, 'uploads');
+        const oldPath = path.join(uploadsDir, oldName);
+        const newPath = path.join(uploadsDir, newName);
+        
+        // Check if old file exists
+        if (!fs.existsSync(oldPath)) {
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Original file not found' 
+            });
+        }
+        
+        // Check if new name already exists
+        if (fs.existsSync(newPath)) {
+            return res.status(409).json({ 
+                success: false, 
+                error: 'A file with that name already exists' 
+            });
+        }
+        
+        // Rename the file
+        fs.renameSync(oldPath, newPath);
+        
+        res.json({
+            success: true,
+            message: 'File renamed successfully',
+            oldName: oldName,
+            newName: newName
+        });
+        
+    } catch (error) {
+        console.error('Rename error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to rename file: ' + error.message 
+        });
+    }
+});
+
 // Gemini API routes
 const geminiRoutes = require('./routes/gemini');
 app.use('/api/gemini', geminiRoutes);
