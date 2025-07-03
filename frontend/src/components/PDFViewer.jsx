@@ -1,7 +1,7 @@
 // FINAL WORKING FIX - PDFViewer.jsx
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight, Highlighter, MessageSquare, Pencil, Underline, Eraser, Brain } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight, Highlighter, MessageSquare, Pencil, Underline, Eraser, Brain, StickyNote } from 'lucide-react';
 import pdfjsWorker from 'react-pdf/dist/pdf.worker.entry.js?url';
 
 // Import required CSS for react-pdf v10
@@ -37,9 +37,13 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiSuggestionsVisible, setAiSuggestionsVisible] = useState(false);
+  const [stickyNoteModal, setStickyNoteModal] = useState(null);
+  const [stickyNoteContent, setStickyNoteContent] = useState('');
+  const [stickyNoteAttachments, setStickyNoteAttachments] = useState([]);
   const pageRef = useRef(null);
   const textLayerRef = useRef(null);
   const pageInputRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   // FIXED: Memoize options to prevent unnecessary reloads
   const documentOptions = useMemo(() => ({
@@ -634,6 +638,118 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     }));
   };
 
+  // Enhanced sticky note functionality
+  const handleStickyNote = (event) => {
+    if (activeAnnotationTool !== 'stickynote') return;
+    
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    
+    // Open sticky note modal
+    setStickyNoteModal({
+      x: x,
+      y: y,
+      originalX: x,
+      originalY: y,
+      isNew: true
+    });
+    setStickyNoteContent('');
+    setStickyNoteAttachments([]);
+  };
+
+  const saveStickyNote = () => {
+    if (!stickyNoteModal || (!stickyNoteContent.trim() && stickyNoteAttachments.length === 0)) {
+      closeStickyNoteModal();
+      return;
+    }
+
+    const pageKey = `page-${currentPage}`;
+    
+    if (stickyNoteModal.isNew) {
+      // Create new sticky note
+      const newStickyNote = {
+        id: Date.now(),
+        type: 'stickynote',
+        x: stickyNoteModal.originalX,
+        y: stickyNoteModal.originalY,
+        content: stickyNoteContent,
+        attachments: stickyNoteAttachments,
+        color: '#fbbf24', // Yellow sticky note color
+        createdAt: new Date().toISOString(),
+        modifiedAt: new Date().toISOString()
+      };
+
+      setAnnotations(prev => ({
+        ...prev,
+        [pageKey]: [...(prev[pageKey] || []), newStickyNote]
+      }));
+    } else {
+      // Update existing sticky note
+      setAnnotations(prev => ({
+        ...prev,
+        [pageKey]: (prev[pageKey] || []).map(annotation => 
+          annotation.id === stickyNoteModal.annotationId
+            ? {
+                ...annotation,
+                content: stickyNoteContent,
+                attachments: stickyNoteAttachments,
+                modifiedAt: new Date().toISOString()
+              }
+            : annotation
+        )
+      }));
+    }
+
+    closeStickyNoteModal();
+  };
+
+  const closeStickyNoteModal = () => {
+    setStickyNoteModal(null);
+    setStickyNoteContent('');
+    setStickyNoteAttachments([]);
+  };
+
+  const handleFileAttachment = (event) => {
+    const files = Array.from(event.target.files);
+    
+    files.forEach(file => {
+      // Create file reader to get base64 data for storage
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const attachment = {
+          id: Date.now() + Math.random(),
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          data: e.target.result, // Base64 data
+          uploadedAt: new Date().toISOString()
+        };
+        
+        setStickyNoteAttachments(prev => [...prev, attachment]);
+      };
+      
+      // Check file size (limit to 5MB per file)
+      if (file.size > 5 * 1024 * 1024) {
+        alert(`File ${file.name} is too large. Maximum size is 5MB.`);
+        return;
+      }
+      
+      reader.readAsDataURL(file);
+    });
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const removeAttachment = (attachmentId) => {
+    setStickyNoteAttachments(prev => 
+      prev.filter(attachment => attachment.id !== attachmentId)
+    );
+  };
+
   const handleUnderline = (event) => {
     if (activeAnnotationTool !== 'underline') return;
     
@@ -880,6 +996,9 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       case 'comment':
         handleComment(event);
         break;
+      case 'stickynote':
+        handleStickyNote(event);
+        break;
       case 'underline':
         handleUnderline(event);
         break;
@@ -966,6 +1085,64 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
               onClick={(e) => handleAnnotationClick(e, annotation.id)}
             >
               💬 {annotation.text.substring(0, 20)}...
+            </div>
+          );
+        case 'stickynote':
+          return (
+            <div
+              key={annotation.id}
+              className="annotation stickynote-annotation"
+              data-annotation-id={annotation.id}
+              style={{
+                position: 'absolute',
+                left: annotation.x,
+                top: annotation.y,
+                backgroundColor: annotation.color,
+                color: '#333',
+                padding: '8px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                minWidth: '150px',
+                maxWidth: '250px',
+                zIndex: 15,
+                pointerEvents: activeAnnotationTool === 'erase' ? 'auto' : 'auto',
+                cursor: activeAnnotationTool === 'erase' ? 'pointer' : 'pointer',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                border: '2px solid #f59e0b'
+              }}
+              title={`Sticky Note: ${annotation.content?.substring(0, 50)}${annotation.content?.length > 50 ? '...' : ''}`}
+              onClick={(e) => {
+                if (activeAnnotationTool === 'erase') {
+                  handleAnnotationClick(e, annotation.id);
+                } else {
+                  // Open sticky note for editing
+                  e.stopPropagation();
+                  setStickyNoteModal({
+                    x: annotation.x,
+                    y: annotation.y,
+                    originalX: annotation.x,
+                    originalY: annotation.y,
+                    isNew: false,
+                    annotationId: annotation.id
+                  });
+                  setStickyNoteContent(annotation.content || '');
+                  setStickyNoteAttachments(annotation.attachments || []);
+                }
+              }}
+            >
+              <div className="stickynote-header">
+                📝 Sticky Note
+                {annotation.attachments && annotation.attachments.length > 0 && (
+                  <span className="attachment-indicator">
+                    📎 {annotation.attachments.length}
+                  </span>
+                )}
+              </div>
+              <div className="stickynote-content">
+                {annotation.content ? 
+                  annotation.content.substring(0, 100) + (annotation.content.length > 100 ? '...' : '') 
+                  : 'Click to add content'}
+              </div>
             </div>
           );
         case 'drawing':
@@ -1159,6 +1336,16 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
             title="Add comment"
           >
             <MessageSquare size={20} />
+          </button>
+          
+          <button
+            onClick={() => setActiveAnnotationTool(
+              activeAnnotationTool === 'stickynote' ? null : 'stickynote'
+            )}
+            className={`toolbar-btn ${activeAnnotationTool === 'stickynote' ? 'active' : ''}`}
+            title="Add sticky note with attachments"
+          >
+            <StickyNote size={20} />
           </button>
           
           <button
@@ -1418,6 +1605,131 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+          
+          {/* Sticky Note Modal */}
+          {stickyNoteModal && (
+            <div className="sticky-note-modal-overlay">
+              <div className="sticky-note-modal" style={{
+                left: Math.min(stickyNoteModal.x, window.innerWidth - 400),
+                top: Math.min(stickyNoteModal.y + 20, window.innerHeight - 500)
+              }}>
+                <div className="sticky-note-modal-header">
+                  <h3>📝 {stickyNoteModal.isNew ? 'New' : 'Edit'} Sticky Note</h3>
+                  <button 
+                    onClick={closeStickyNoteModal}
+                    className="modal-close-btn"
+                    title="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+                
+                <div className="sticky-note-modal-content">
+                  <div className="content-section">
+                    <label>Note Content:</label>
+                    <textarea
+                      value={stickyNoteContent}
+                      onChange={(e) => setStickyNoteContent(e.target.value)}
+                      placeholder="Enter your notes here..."
+                      className="sticky-note-textarea"
+                      rows={4}
+                    />
+                  </div>
+                  
+                  <div className="attachments-section">
+                    <label>Attachments:</label>
+                    <div className="attachment-controls">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        accept="image/*,.pdf,.doc,.docx,.txt"
+                        onChange={handleFileAttachment}
+                        style={{ display: 'none' }}
+                      />
+                      <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="attach-btn"
+                      >
+                        📎 Attach Files
+                      </button>
+                      <span className="attachment-note">
+                        Max 5MB per file (Images, PDFs, Documents)
+                      </span>
+                    </div>
+                    
+                    {stickyNoteAttachments.length > 0 && (
+                      <div className="attachments-list">
+                        {stickyNoteAttachments.map(attachment => (
+                          <div key={attachment.id} className="attachment-item">
+                            <div className="attachment-info">
+                              {attachment.type.startsWith('image/') ? (
+                                <div className="attachment-preview">
+                                  <img 
+                                    src={attachment.data} 
+                                    alt={attachment.name}
+                                    className="attachment-thumbnail"
+                                    style={{
+                                      width: '60px',
+                                      height: '60px',
+                                      objectFit: 'cover',
+                                      borderRadius: '4px',
+                                      border: '1px solid #e5e7eb',
+                                      marginRight: '8px'
+                                    }}
+                                  />
+                                  <div className="attachment-details">
+                                    <span className="attachment-name">
+                                      🖼️ {attachment.name}
+                                    </span>
+                                    <span className="attachment-size">
+                                      ({(attachment.size / 1024).toFixed(1)} KB)
+                                    </span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="attachment-details">
+                                  <span className="attachment-name">
+                                    📄 {attachment.name}
+                                  </span>
+                                  <span className="attachment-size">
+                                    ({(attachment.size / 1024).toFixed(1)} KB)
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                            <button 
+                              onClick={() => removeAttachment(attachment.id)}
+                              className="remove-attachment-btn"
+                              title="Remove attachment"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="modal-actions">
+                    <button 
+                      onClick={saveStickyNote}
+                      className="save-btn"
+                      disabled={!stickyNoteContent.trim() && stickyNoteAttachments.length === 0}
+                    >
+                      💾 Save Note
+                    </button>
+                    <button 
+                      onClick={closeStickyNoteModal}
+                      className="cancel-btn"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           )}
