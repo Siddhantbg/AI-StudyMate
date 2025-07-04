@@ -12,6 +12,7 @@ import AuthPage from './components/Auth/AuthPage';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { SessionProvider } from './contexts/SessionContext';
 import { saveFile } from './utils/fileStorage';
 import { usePageTrackingAPI } from './utils/pageTrackingAPI';
 import { useHybridAPI } from './utils/hybridAPI';
@@ -502,7 +503,11 @@ const handleFileLoad = async (file, uploadedFileName, metadata) => {
 
   // Handle PDF rename
   const handleRename = async (newName) => {
-    if (!uploadedFileName) return;
+    if (!fileId || !newName) {
+      console.error('File ID and new name are required for rename');
+      showToast('File ID and new name are required', 'error');
+      return;
+    }
 
     try {
       const response = await makeAuthenticatedRequest(`${import.meta.env.VITE_API_BASE_URL}/api/files/rename`, {
@@ -511,7 +516,7 @@ const handleFileLoad = async (file, uploadedFileName, metadata) => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          oldName: uploadedFileName,
+          fileId: fileId,
           newName: newName
         }),
       });
@@ -755,8 +760,10 @@ function App() {
   return (
     <ToastProvider>
       <AuthProvider>
-        <AppContent />
-        <ToastContainer />
+        <SessionProvider>
+          <AppContent />
+          <ToastContainer />
+        </SessionProvider>
       </AuthProvider>
     </ToastProvider>
   );

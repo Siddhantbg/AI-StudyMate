@@ -342,6 +342,10 @@ app.use('/api/pdf', pdfRoutes);
 const quizRoutes = require('./routes/quiz');
 app.use('/api/quiz', quizRoutes);
 
+// Session persistence routes
+const sessionRoutes = require('./routes/sessions');
+app.use('/api/sessions', sessionRoutes);
+
 // Health check routes (public)
 const healthRoutes = require('./routes/health');
 app.use('/api/health', healthRoutes);

@@ -10,27 +10,59 @@ const RenameModal = ({ isOpen, onClose, currentName, onRename }) => {
       // Remove .pdf extension for editing
       const nameWithoutExtension = currentName.replace(/\.pdf$/i, '');
       setNewName(nameWithoutExtension);
+      setError(''); // Clear any previous errors
     }
   }, [isOpen, currentName]);
+
+  const [error, setError] = useState('');
+
+  const validateFileName = (name) => {
+    if (!name.trim()) {
+      return 'File name cannot be empty';
+    }
+    
+    if (name.trim().length < 1) {
+      return 'File name must be at least 1 character';
+    }
+    
+    if (name.trim().length > 100) {
+      return 'File name must be less than 100 characters';
+    }
+    
+    // Check for invalid characters
+    const invalidChars = /[<>:"/\\|?*]/;
+    if (invalidChars.test(name)) {
+      return 'File name contains invalid characters: < > : " / \\ | ? *';
+    }
+    
+    return '';
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (!newName.trim()) {
+    const trimmedName = newName.trim();
+    const validationError = validateFileName(trimmedName);
+    
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
     // Add .pdf extension if not present
-    const finalName = newName.trim().toLowerCase().endsWith('.pdf') 
-      ? newName.trim() 
-      : newName.trim() + '.pdf';
+    const finalName = trimmedName.toLowerCase().endsWith('.pdf') 
+      ? trimmedName 
+      : trimmedName + '.pdf';
 
     setIsLoading(true);
+    setError('');
+    
     try {
       await onRename(finalName);
       onClose();
     } catch (error) {
       console.error('Rename error:', error);
+      setError(error.message || 'Failed to rename file');
     } finally {
       setIsLoading(false);
     }
@@ -68,13 +100,26 @@ const RenameModal = ({ isOpen, onClose, currentName, onRename }) => {
               id="fileName"
               type="text"
               value={newName}
-              onChange={(e) => setNewName(e.target.value)}
+              onChange={(e) => {
+                setNewName(e.target.value);
+                if (error) setError(''); // Clear error when user types
+              }}
               onKeyDown={handleKeyDown}
               placeholder="Enter new file name"
               disabled={isLoading}
               autoFocus
               maxLength={100}
+              className={error ? 'error' : ''}
             />
+            {error && (
+              <div className="form-error" style={{
+                color: '#dc2626',
+                fontSize: '0.8rem',
+                marginTop: '0.25rem'
+              }}>
+                {error}
+              </div>
+            )}
             <small className="form-hint">
               .pdf extension will be added automatically
             </small>

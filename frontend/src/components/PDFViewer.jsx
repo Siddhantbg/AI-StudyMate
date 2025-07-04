@@ -1842,9 +1842,9 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
                 style={{
                   position: 'absolute',
                   left: coord.x,
-                  top: coord.y,
+                  top: coord.y + Math.max(coord.height - 2, coord.height * 0.9), // Position near bottom, accounting for scale
                   width: coord.width,
-                  height: coord.height,
+                  height: Math.max(2, Math.round(2 * (scale || 1))), // Scale height with zoom but minimum 2px
                   backgroundColor: annotation.color,
                   pointerEvents: activeAnnotationTool === 'erase' ? 'auto' : 'none',
                   cursor: activeAnnotationTool === 'erase' ? 'pointer' : 'default',

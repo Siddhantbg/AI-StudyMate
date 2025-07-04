@@ -8,6 +8,7 @@ const Annotation = require('./Annotation')(sequelize, DataTypes);
 const QuizResult = require('./QuizResult')(sequelize, DataTypes);
 const UserSession = require('./UserSession')(sequelize, DataTypes);
 const PageTracking = require('./PageTracking')(sequelize, DataTypes);
+const PDFSession = require('./PDFSession')(sequelize, DataTypes);
 
 // Define associations
 const defineAssociations = () => {
@@ -41,6 +42,12 @@ const defineAssociations = () => {
     as: 'page_tracking',
     onDelete: 'CASCADE'
   });
+  
+  User.hasMany(PDFSession, { 
+    foreignKey: 'user_id', 
+    as: 'pdf_sessions',
+    onDelete: 'CASCADE'
+  });
 
   // File associations
   File.belongsTo(User, { 
@@ -63,6 +70,12 @@ const defineAssociations = () => {
   File.hasMany(PageTracking, { 
     foreignKey: 'file_id', 
     as: 'page_tracking',
+    onDelete: 'CASCADE'
+  });
+  
+  File.hasMany(PDFSession, { 
+    foreignKey: 'file_id', 
+    as: 'pdf_sessions',
     onDelete: 'CASCADE'
   });
 
@@ -104,6 +117,17 @@ const defineAssociations = () => {
     foreignKey: 'file_id', 
     as: 'file'
   });
+
+  // PDFSession associations
+  PDFSession.belongsTo(User, { 
+    foreignKey: 'user_id', 
+    as: 'user'
+  });
+  
+  PDFSession.belongsTo(File, { 
+    foreignKey: 'file_id', 
+    as: 'file'
+  });
 };
 
 // Initialize associations
@@ -117,6 +141,7 @@ module.exports = {
   QuizResult,
   UserSession,
   PageTracking,
+  PDFSession,
   
   // Helper function to sync all models
   syncDatabase: async (force = false) => {
