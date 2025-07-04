@@ -4,7 +4,15 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const cookieParser = require('cookie-parser');
 require('dotenv').config();
+
+// Initialize database connection
+const { testConnection, initializeDatabase } = require('./config/database');
+
+// Import middleware
+const { httpLogger, logger } = require('./middleware/logging');
+const { errorHandler, notFoundHandler, multerErrorHandler } = require('./middleware/errorHandler');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -14,8 +22,13 @@ app.use(cors({
     origin: ['https://ai-study-mate-seven.vercel.app', 'http://localhost:5173'],
     credentials: true
 }));
+
+// Logging middleware (before routes)
+app.use(httpLogger);
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(cookieParser());
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -53,19 +66,34 @@ app.get('/', (req, res) => {
     res.json({ message: 'Forest PDF Viewer API is running! 🌲' });
 });
 
-// PDF Upload endpoint
-app.post('/api/upload', upload.single('pdf'), (req, res) => {
+// PDF Upload endpoint (now requires authentication)
+const { authenticateToken, optionalAuth } = require('./middleware/auth');
+const { File } = require('./models');
+
+app.post('/api/upload', authenticateToken, upload.single('pdf'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'No PDF file uploaded' });
         }
 
+        // Create file record in database
+        const fileRecord = await File.create({
+            user_id: req.userId,
+            filename: req.file.filename,
+            original_name: req.file.originalname,
+            file_size: req.file.size,
+            file_path: req.file.path,
+            upload_source: 'server',
+            processing_status: 'pending'
+        });
+
         const fileInfo = {
+            id: fileRecord.id,
             filename: req.file.filename,
             originalName: req.file.originalname,
             size: req.file.size,
             path: req.file.path,
-            uploadTime: new Date().toISOString()
+            uploadTime: fileRecord.created_at
         };
 
         res.json({
@@ -79,31 +107,43 @@ app.post('/api/upload', upload.single('pdf'), (req, res) => {
     }
 });
 
-// Serve uploaded PDF files
-app.get('/api/files/:filename', (req, res) => {
+// Serve uploaded PDF files (with user authorization)
+app.get('/api/files/:filename', authenticateToken, async (req, res) => {
     try {
         const filename = req.params.filename;
+        
+        // Check if user owns this file
+        const fileRecord = await File.findOne({
+            where: {
+                filename: filename,
+                user_id: req.userId
+            }
+        });
+        
+        if (!fileRecord) {
+            return res.status(404).json({ 
+                success: false,
+                error: 'File not found or access denied',
+                code: 'FILE_NOT_FOUND'
+            });
+        }
+        
         const filePath = path.join(__dirname, 'uploads', filename);
         
-        console.log(`Attempting to serve file: ${filename}`);
-        console.log(`File path: ${filePath}`);
-        console.log(`File exists: ${fs.existsSync(filePath)}`);
+        console.log(`Serving file: ${filename} for user: ${req.userId}`);
         
-        // List all files in uploads directory for debugging
         if (!fs.existsSync(filePath)) {
-            const uploadsDir = path.join(__dirname, 'uploads');
-            const availableFiles = fs.readdirSync(uploadsDir);
-            console.log(`Available files in uploads:`, availableFiles);
             return res.status(404).json({ 
-                error: 'File not found',
-                requestedFile: filename,
-                availableFiles: availableFiles
+                success: false,
+                error: 'File not found on disk',
+                code: 'FILE_NOT_ON_DISK'
             });
         }
         
         // Set proper headers for PDF
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+        res.setHeader('Content-Disposition', `inline; filename="${fileRecord.original_name}"`);
         
         // Stream the file
         const fileStream = fs.createReadStream(filePath);
@@ -111,128 +151,184 @@ app.get('/api/files/:filename', (req, res) => {
         
     } catch (error) {
         console.error('File serving error:', error);
-        res.status(500).json({ error: 'Failed to serve file' });
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to serve file',
+            code: 'FILE_SERVE_ERROR'
+        });
     }
 });
 
-// List uploaded files endpoint
-app.get('/api/files', (req, res) => {
+// List uploaded files endpoint (user-specific)
+app.get('/api/files/list', authenticateToken, async (req, res) => {
     try {
-        const uploadsDir = path.join(__dirname, 'uploads');
+        // Get files from database for the authenticated user
+        const userFiles = await File.findAll({
+            where: {
+                user_id: req.userId,
+                is_archived: false
+            },
+            order: [['created_at', 'DESC']] // Sort by newest first
+        });
         
-        // Check if uploads directory exists
-        if (!fs.existsSync(uploadsDir)) {
-            return res.json({ files: [] });
-        }
-        
-        // Read all files in uploads directory
-        const files = fs.readdirSync(uploadsDir);
-        
-        // Filter for PDF files and get file stats
-        const pdfFiles = files
-            .filter(file => file.toLowerCase().endsWith('.pdf'))
-            .map(filename => {
-                const filePath = path.join(uploadsDir, filename);
-                const stats = fs.statSync(filePath);
-                
-                // Extract original filename if it follows the pattern: fieldname-timestamp-random.pdf
-                let originalName = filename;
-                if (filename.startsWith('pdf-') && filename.includes('-')) {
-                    // Try to extract original name from upload pattern
-                    originalName = filename; // Keep as is, or you could implement original name extraction
-                }
-                
-                return {
-                    id: filename, // Use filename as ID for server files
-                    fileName: originalName,
-                    uploadedFileName: filename, // This must match the actual filename in uploads/
-                    fileSize: stats.size,
-                    fileType: 'application/pdf',
-                    uploadDate: stats.mtime.toISOString(),
-                    source: 'server' // Mark as server-stored file
-                };
-            })
-            .sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate)); // Sort by newest first
+        const formattedFiles = userFiles.map(file => ({
+            id: file.id,
+            fileName: file.display_name || file.original_name,
+            originalName: file.original_name,
+            filename: file.filename, // For compatibility with existing frontend
+            fileSize: file.file_size,
+            fileType: file.mime_type,
+            uploadDate: file.created_at,
+            source: 'database', // Mark as database-stored file
+            numPages: file.num_pages,
+            lastReadPage: file.last_read_page,
+            totalReadTime: file.total_read_time,
+            tags: file.tags,
+            isFavorite: file.is_favorite,
+            processingStatus: file.processing_status
+        }));
         
         res.json({ 
             success: true, 
-            files: pdfFiles,
-            count: pdfFiles.length 
+            files: formattedFiles,
+            count: formattedFiles.length 
         });
         
     } catch (error) {
         console.error('Error listing files:', error);
-        res.status(500).json({ error: 'Failed to list uploaded files' });
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to list uploaded files',
+            code: 'FILE_LIST_ERROR'
+        });
     }
 });
 
-// Rename uploaded file endpoint
-app.post('/api/files/rename', (req, res) => {
+// List uploaded files endpoint (user-specific) - alternative route
+app.get('/api/files', authenticateToken, async (req, res) => {
     try {
-        const { oldName, newName } = req.body;
+        // Get files from database for the authenticated user
+        const userFiles = await File.findAll({
+            where: {
+                user_id: req.userId,
+                is_archived: false
+            },
+            order: [['created_at', 'DESC']] // Sort by newest first
+        });
         
-        if (!oldName || !newName) {
+        const formattedFiles = userFiles.map(file => ({
+            id: file.id,
+            fileName: file.display_name || file.original_name,
+            originalName: file.original_name,
+            uploadedFileName: file.filename, // For compatibility with existing frontend
+            fileSize: file.file_size,
+            fileType: file.mime_type,
+            uploadDate: file.created_at,
+            source: 'database', // Mark as database-stored file
+            numPages: file.num_pages,
+            lastReadPage: file.last_read_page,
+            totalReadTime: file.total_read_time,
+            tags: file.tags,
+            isFavorite: file.is_favorite,
+            processingStatus: file.processing_status,
+            // readingStats: file.getReadingStats() // Comment out if method doesn't exist
+        }));
+        
+        res.json({ 
+            success: true, 
+            files: formattedFiles,
+            count: formattedFiles.length 
+        });
+        
+    } catch (error) {
+        console.error('Error listing files:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to list uploaded files',
+            code: 'FILE_LIST_ERROR'
+        });
+    }
+});
+
+// Rename uploaded file endpoint (user-specific)
+app.post('/api/files/rename', authenticateToken, async (req, res) => {
+    try {
+        const { fileId, newName } = req.body;
+        
+        if (!fileId || !newName) {
             return res.status(400).json({ 
                 success: false, 
-                error: 'Both oldName and newName are required' 
+                error: 'File ID and new name are required',
+                code: 'MISSING_PARAMS'
             });
         }
 
-        // Validate new name
-        if (!newName.toLowerCase().endsWith('.pdf')) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'New name must end with .pdf extension' 
-            });
-        }
-
-        // Check for invalid characters
+        // Check for invalid characters in display name
         const invalidChars = /[<>:"/\\|?*]/;
         if (invalidChars.test(newName)) {
             return res.status(400).json({ 
                 success: false, 
-                error: 'File name contains invalid characters' 
+                error: 'File name contains invalid characters',
+                code: 'INVALID_CHARACTERS'
             });
         }
 
-        const uploadsDir = path.join(__dirname, 'uploads');
-        const oldPath = path.join(uploadsDir, oldName);
-        const newPath = path.join(uploadsDir, newName);
+        // Find the file record for this user
+        const fileRecord = await File.findOne({
+            where: {
+                id: fileId,
+                user_id: req.userId
+            }
+        });
         
-        // Check if old file exists
-        if (!fs.existsSync(oldPath)) {
+        if (!fileRecord) {
             return res.status(404).json({ 
                 success: false, 
-                error: 'Original file not found' 
+                error: 'File not found or access denied',
+                code: 'FILE_NOT_FOUND'
             });
         }
         
-        // Check if new name already exists
-        if (fs.existsSync(newPath)) {
-            return res.status(409).json({ 
-                success: false, 
-                error: 'A file with that name already exists' 
-            });
-        }
-        
-        // Rename the file
-        fs.renameSync(oldPath, newPath);
+        // Update the display name in database
+        fileRecord.display_name = newName;
+        await fileRecord.save();
         
         res.json({
             success: true,
             message: 'File renamed successfully',
-            oldName: oldName,
-            newName: newName
+            data: {
+                fileId: fileRecord.id,
+                oldName: fileRecord.original_name,
+                newName: newName,
+                displayName: fileRecord.display_name
+            }
         });
         
     } catch (error) {
         console.error('Rename error:', error);
         res.status(500).json({ 
             success: false, 
-            error: 'Failed to rename file: ' + error.message 
+            error: 'Failed to rename file: ' + error.message,
+            code: 'RENAME_ERROR'
         });
     }
 });
+
+// Authentication routes
+const authRoutes = require('./routes/auth');
+app.use('/api/auth', authRoutes);
+
+// Annotation routes
+const annotationRoutes = require('./routes/annotations');
+app.use('/api/annotations', annotationRoutes);
+
+// Page tracking routes
+const pageTrackingRoutes = require('./routes/pageTracking');
+app.use('/api/page-tracking', pageTrackingRoutes);
+
+// Data export routes
+const dataExportRoutes = require('./routes/dataExport');
+app.use('/api/data-export', dataExportRoutes);
 
 // Gemini API routes
 const geminiRoutes = require('./routes/gemini');
@@ -246,26 +342,51 @@ app.use('/api/pdf', pdfRoutes);
 const quizRoutes = require('./routes/quiz');
 app.use('/api/quiz', quizRoutes);
 
+// Health check routes (public)
+const healthRoutes = require('./routes/health');
+app.use('/api/health', healthRoutes);
+
 // Error handling middleware
-app.use((error, req, res, next) => {
-    if (error instanceof multer.MulterError) {
-        if (error.code === 'LIMIT_FILE_SIZE') {
-            return res.status(400).json({ error: 'File too large. Maximum size is 100MB.' });
+app.use(multerErrorHandler); // Handle multer-specific errors first
+app.use(errorHandler); // Main error handler
+app.use(notFoundHandler); // 404 handler (should be last)
+
+// Initialize database and start server
+const startServer = async () => {
+    try {
+        // Test database connection
+        console.log('🔗 Connecting to database...');
+        const connectionSuccess = await testConnection();
+        
+        if (connectionSuccess) {
+            // Initialize database models
+            await initializeDatabase();
+            logger.info('Database initialized successfully');
+            
+            // Start server
+            app.listen(PORT, () => {
+                logger.info(`Forest PDF Viewer server started`, {
+                    port: PORT,
+                    environment: process.env.NODE_ENV || 'development',
+                    timestamp: new Date().toISOString()
+                });
+                console.log(`🌲 Forest PDF Viewer server running on port ${PORT}`);
+                console.log(`📚 Ready to process PDFs and generate insights!`);
+                console.log(`🔐 Authentication endpoints available at /api/auth/`);
+                console.log(`📊 Comprehensive logging and error handling enabled`);
+            });
+        } else {
+            logger.error('Failed to connect to database. Server startup aborted.');
+            console.error('❌ Failed to connect to database. Server will not start.');
+            process.exit(1);
         }
+    } catch (error) {
+        console.error('❌ Failed to start server:', error.message);
+        process.exit(1);
     }
-    
-    console.error('Server error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-});
+};
 
-// 404 handler
-app.use('*', (req, res) => {
-    res.status(404).json({ error: 'Route not found' });
-});
-
-app.listen(PORT, () => {
-    console.log(`🌲 Forest PDF Viewer server running on port ${PORT}`);
-    console.log(`📚 Ready to process PDFs and generate insights!`);
-});
+// Start the server
+startServer();
 
 module.exports = app;

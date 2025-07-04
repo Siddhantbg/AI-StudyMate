@@ -17,8 +17,10 @@ import {
   Clipboard,
   X
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
-const Sidebar = ({ uploadedFileName, currentPage, totalPages, onPageChange }) => {
+const Sidebar = ({ uploadedFileName, fileId, currentPage, totalPages, onPageChange }) => {
+  const { makeAuthenticatedRequest } = useAuth();
   const [activeTab, setActiveTab] = useState('summarize');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState({});
@@ -53,7 +55,7 @@ const Sidebar = ({ uploadedFileName, currentPage, totalPages, onPageChange }) =>
   // Extract text from PDF for AI processing
   const extractPDFText = async (filename, pages = null) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/pdf/extract-text`, {
+      const response = await makeAuthenticatedRequest(`${API_BASE_URL}/api/pdf/extract-text`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -84,7 +86,7 @@ const Sidebar = ({ uploadedFileName, currentPage, totalPages, onPageChange }) =>
     try {
       const text = await extractPDFText(uploadedFileName);
       
-      const response = await fetch(`${API_BASE_URL}/api/gemini/summarize-page`, {
+      const response = await makeAuthenticatedRequest(`${API_BASE_URL}/api/gemini/summarize-page`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -129,7 +131,7 @@ const Sidebar = ({ uploadedFileName, currentPage, totalPages, onPageChange }) =>
     try {
       const text = await extractPDFText(uploadedFileName);
       
-      const response = await fetch(`${API_BASE_URL}/api/gemini/summarize-range`, {
+      const response = await makeAuthenticatedRequest(`${API_BASE_URL}/api/gemini/summarize-range`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -172,7 +174,7 @@ const Sidebar = ({ uploadedFileName, currentPage, totalPages, onPageChange }) =>
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/gemini/explain`, {
+      const response = await makeAuthenticatedRequest(`${API_BASE_URL}/api/gemini/explain`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -213,7 +215,7 @@ const Sidebar = ({ uploadedFileName, currentPage, totalPages, onPageChange }) =>
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/quiz/generate`, {
+      const response = await makeAuthenticatedRequest(`${API_BASE_URL}/api/quiz/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

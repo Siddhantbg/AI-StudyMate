@@ -5,9 +5,23 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   
+  // Use esbuild-wasm for cross-platform compatibility
+  esbuild: {
+    loader: 'jsx',
+    include: /src\/.*\.[jt]sx?$/
+  },
+  
   // Basic optimizations
   optimizeDeps: {
-    include: ['react-pdf', 'pdfjs-dist']
+    include: ['react-pdf', 'pdfjs-dist'],
+    esbuildOptions: {
+      loader: {
+        '.js': 'jsx',
+        '.ts': 'tsx',
+        '.jsx': 'jsx',
+        '.tsx': 'tsx'
+      }
+    }
   },
   
   // Simple server config

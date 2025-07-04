@@ -4,6 +4,9 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import { ZoomIn, ZoomOut, RotateCw, ChevronLeft, ChevronRight, Highlighter, MessageSquare, Pencil, Underline, Eraser, Brain, StickyNote } from 'lucide-react';
 import pdfjsWorker from 'react-pdf/dist/pdf.worker.entry.js?url';
 import { useToast } from '../contexts/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
+import { useHybridAPI } from '../utils/hybridAPI';
+import { useConnectionStatus } from '../utils/connectionStatus';
 
 // Import required CSS for react-pdf v10
 import 'react-pdf/dist/Page/AnnotationLayer.css';
@@ -15,16 +18,20 @@ pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 console.log('PDF.js version:', pdfjs.version);
 console.log('PDF.js worker configured:', pdfjs.GlobalWorkerOptions.workerSrc);
 
-const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFileName }) => {
+const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFileName, fileId }) => {
   console.log('=== PDFViewer Debug Info ===');
   console.log('File received:', file);
   console.log('File type:', typeof file);
   console.log('File constructor:', file?.constructor?.name);
   console.log('Uploaded filename:', uploadedFileName);
   console.log('Current page:', currentPage);
+  console.log('FileId for database:', fileId);
 
-  // Toast notifications
+  // Toast notifications and APIs
   const { showToast } = useToast();
+  const { makeAuthenticatedRequest, user } = useAuth();
+  const hybridAPI = useHybridAPI();
+  const connectionStatus = useConnectionStatus();
 
   const [numPages, setNumPages] = useState(null);
   const [scale, setScale] = useState(1.0);
@@ -47,6 +54,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
   const [drawingColor, setDrawingColor] = useState('#2196f3');
   const [showColorPalette, setShowColorPalette] = useState(false);
   const [paletteOpenUpward, setPaletteOpenUpward] = useState(false);
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
   
   // Drawing color palette
   const drawingColors = [
@@ -348,31 +356,236 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     };
   }, [currentPage, scale]); // Add scale dependency for coordinate accuracy
 
-  // Annotation persistence functions
-  const saveAnnotations = (pageAnnotations, filename, page) => {
-    if (!filename) return;
-    const key = `annotations-${filename}-page-${page}`;
-    localStorage.setItem(key, JSON.stringify(pageAnnotations));
-  };
-
-  const loadAnnotations = (filename, page) => {
-    if (!filename) return [];
-    const key = `annotations-${filename}-page-${page}`;
-    const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : [];
-  };
-
-
-  // Save annotations when they change
-  useEffect(() => {
-    if (uploadedFileName && currentPage) {
-      const pageKey = `page-${currentPage}`;
-      const pageAnnotations = annotations[pageKey] || [];
-      if (pageAnnotations.length > 0) {
-        saveAnnotations(pageAnnotations, uploadedFileName, currentPage);
-      }
+  // Database-based annotation persistence functions
+  const saveAnnotation = async (annotation) => {
+    if (!fileId) {
+      console.warn('No fileId available, saving to localStorage only');
+      return { success: true, id: annotation.id, source: 'localStorage' };
     }
-  }, [annotations, uploadedFileName, currentPage]);
+    
+    try {
+      const annotationData = {
+        file_id: fileId,
+        page_number: currentPage,
+        annotation_type: annotation.type,
+        coordinates: annotation.coordinates || null,
+        content: annotation.content || null,
+        selected_text: annotation.selectedText || annotation.text || null,
+        color: annotation.color || '#ffff00',
+        attachments: annotation.attachments || [],
+        style_properties: annotation.style || {},
+        ai_generated: annotation.isAISuggested || annotation.ai_generated || false,
+        ai_metadata: annotation.isAISuggested ? {
+          category: annotation.aiCategory,
+          reason: annotation.aiReason,
+          importance: annotation.aiImportance
+        } : null,
+        is_text_selection: annotation.isTextSelection || false,
+        coordinate_version: annotation.metadata?.coordinateVersion || '2.0',
+        metadata: annotation.metadata || {},
+        tags: annotation.tags || []
+      };
+
+      const response = await makeAuthenticatedRequest(`${import.meta.env.VITE_API_BASE_URL}/api/annotations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(annotationData)
+      });
+
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to save annotation');
+      }
+      
+      return { success: true, data: result.data, source: 'database' };
+    } catch (error) {
+      console.error('Failed to save annotation to database:', error);
+      // Don't throw error, let it fallback to localStorage
+      return { success: false, error: error.message };
+    }
+  };
+
+  const loadAnnotations = async (fileId, page) => {
+    if (!fileId || !page) return [];
+    
+    try {
+      const response = await makeAuthenticatedRequest(
+        `${import.meta.env.VITE_API_BASE_URL}/api/annotations/file/${fileId}/page/${page}`
+      );
+      
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to load annotations');
+      }
+      
+      // Convert database format to component format
+      return result.data.annotations.map(annotation => ({
+        id: annotation.id,
+        type: annotation.annotation_type,
+        coordinates: annotation.coordinates,
+        content: annotation.content,
+        selectedText: annotation.selected_text,
+        text: annotation.selected_text, // alias for compatibility
+        color: annotation.color,
+        attachments: annotation.attachments || [],
+        style: annotation.style_properties || {},
+        isAISuggested: annotation.ai_generated,
+        ai_generated: annotation.ai_generated,
+        aiCategory: annotation.ai_metadata?.category,
+        aiReason: annotation.ai_metadata?.reason,
+        aiImportance: annotation.ai_metadata?.importance,
+        isTextSelection: annotation.is_text_selection,
+        metadata: {
+          ...annotation.metadata,
+          coordinateVersion: annotation.coordinate_version,
+          createdAt: annotation.created_at,
+          updatedAt: annotation.updated_at
+        },
+        tags: annotation.tags || [],
+        dbId: annotation.id // Store database ID for updates/deletes
+      }));
+    } catch (error) {
+      console.error('Failed to load annotations from database:', error);
+      return [];
+    }
+  };
+
+  const deleteAnnotation = async (annotationId) => {
+    if (!annotationId) return;
+    
+    try {
+      const response = await makeAuthenticatedRequest(
+        `${import.meta.env.VITE_API_BASE_URL}/api/annotations/${annotationId}`,
+        { method: 'DELETE' }
+      );
+      
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to delete annotation');
+      }
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to delete annotation from database:', error);
+      throw error;
+    }
+  };
+
+  // Helper function to add annotation to both state and database
+  const addAnnotation = async (annotation) => {
+    const pageKey = `page-${currentPage}`;
+    
+    // Add to local state immediately for responsiveness
+    setAnnotations(prev => ({
+      ...prev,
+      [pageKey]: [...(prev[pageKey] || []), annotation]
+    }));
+
+    // Save to database in background
+    try {
+      const savedAnnotation = await saveAnnotation(annotation);
+      
+      if (savedAnnotation.success && savedAnnotation.data) {
+        // Update the annotation with the database ID
+        setAnnotations(prev => ({
+          ...prev,
+          [pageKey]: (prev[pageKey] || []).map(ann => 
+            ann.id === annotation.id ? { ...ann, dbId: savedAnnotation.data.id } : ann
+          )
+        }));
+        
+        console.log('Annotation saved to database successfully:', savedAnnotation.data.id);
+      } else {
+        console.warn('Failed to save to database, annotation remains in local state only');
+      }
+    } catch (error) {
+      console.error('Database save failed for annotation:', error);
+      // Keep annotation in local state even if database save fails
+    }
+
+    // Always save to localStorage as backup (user-specific key)
+    try {
+      const userId = user?.id || 'anonymous';
+      const storageKey = `annotations_${userId}_${uploadedFileName || 'unknown'}`;
+      const existingAnnotations = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      existingAnnotations[pageKey] = [...(existingAnnotations[pageKey] || []), annotation];
+      localStorage.setItem(storageKey, JSON.stringify(existingAnnotations));
+      console.log('Annotation saved to localStorage with user-specific key:', storageKey);
+    } catch (error) {
+      console.warn('Failed to save annotation to localStorage:', error);
+    }
+  };
+
+  // Helper function to remove annotation from both state and database with visual feedback
+  const removeAnnotation = async (annotationId, showSuccessMessage = true) => {
+    const pageKey = `page-${currentPage}`;
+    
+    // Find the annotation to get its database ID
+    const pageAnnotations = annotations[pageKey] || [];
+    const annotation = pageAnnotations.find(ann => ann.id === annotationId);
+    const dbId = annotation?.dbId || (annotation?.id && annotation.id.length > 10 ? annotation.id : null);
+
+    // Show visual feedback before removing
+    const annotationElement = document.querySelector(`[data-annotation-id="${annotationId}"]`);
+    
+    const performRemoval = async () => {
+      // Remove from local state first for immediate UI feedback
+      setAnnotations(prev => ({
+        ...prev,
+        [pageKey]: (prev[pageKey] || []).filter(ann => ann.id !== annotationId)
+      }));
+
+      // Remove from database in background
+      if (dbId) {
+        try {
+          await deleteAnnotation(dbId);
+          console.log('Annotation deleted from database:', dbId);
+        } catch (error) {
+          console.error('Failed to delete annotation from database:', error);
+          showToast('Failed to delete from server, but removed locally', 'warning', 3000);
+        }
+      }
+
+      // Remove from localStorage as well (user-specific key)
+      try {
+        const userId = user?.id || 'anonymous';
+        const storageKey = `annotations_${userId}_${uploadedFileName || 'unknown'}`;
+        const existingAnnotations = JSON.parse(localStorage.getItem(storageKey) || '{}');
+        if (existingAnnotations[pageKey]) {
+          existingAnnotations[pageKey] = existingAnnotations[pageKey].filter(ann => ann.id !== annotationId);
+          localStorage.setItem(storageKey, JSON.stringify(existingAnnotations));
+        }
+      } catch (error) {
+        console.warn('Failed to remove annotation from localStorage:', error);
+      }
+
+      // Show success feedback only if requested
+      if (showSuccessMessage) {
+        showEraseSuccessMessage();
+      }
+    };
+
+    if (annotationElement) {
+      // Apply visual animation before removal
+      annotationElement.style.transition = 'all 0.3s ease';
+      annotationElement.style.transform = 'scale(0.8)';
+      annotationElement.style.opacity = '0';
+      
+      // Wait for animation to complete before removing
+      setTimeout(performRemoval, 300);
+    } else {
+      // Fallback immediate removal if element not found
+      await performRemoval();
+    }
+  };
+
+
+  // Note: Annotation saving is now handled individually when annotations are created/modified
 
   // Force annotation re-positioning when scale or text layer changes
   useEffect(() => {
@@ -670,19 +883,44 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
 
   // Load annotations when page or file changes with validation
   useEffect(() => {
-    if (uploadedFileName && currentPage) {
-      const savedAnnotations = loadAnnotations(uploadedFileName, currentPage);
+    const loadPageAnnotations = async () => {
+      const pageKey = `page-${currentPage}`;
+      let annotationsToLoad = [];
+      
+      // Try to load from database first
+      if (fileId && currentPage) {
+        try {
+          const savedAnnotations = await loadAnnotations(fileId, currentPage);
+          annotationsToLoad = savedAnnotations;
+        } catch (error) {
+          console.error('Failed to load page annotations from database:', error);
+        }
+      }
+      
+      // Fallback to localStorage if database fails or no fileId (user-specific key)
+      if (annotationsToLoad.length === 0 && uploadedFileName) {
+        try {
+          const userId = user?.id || 'anonymous';
+          const storageKey = `annotations_${userId}_${uploadedFileName}`;
+          const storedAnnotations = JSON.parse(localStorage.getItem(storageKey) || '{}');
+          annotationsToLoad = storedAnnotations[pageKey] || [];
+          console.log('Loaded annotations from localStorage for user:', userId, 'count:', annotationsToLoad.length);
+        } catch (error) {
+          console.warn('Failed to load annotations from localStorage:', error);
+        }
+      }
       
       // Validate and recover coordinates if needed
-      const validatedAnnotations = savedAnnotations.map(validateAndRecoverCoordinates);
+      const validatedAnnotations = annotationsToLoad.map(validateAndRecoverCoordinates);
       
-      const pageKey = `page-${currentPage}`;
       setAnnotations(prev => ({
         ...prev,
         [pageKey]: validatedAnnotations
       }));
-    }
-  }, [uploadedFileName, currentPage]);
+    };
+
+    loadPageAnnotations();
+  }, [fileId, currentPage, uploadedFileName]);
 
   const analyzePageForHighlights = async () => {
     if (!uploadedFileName || isAnalyzing) return;
@@ -740,7 +978,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     }
   };
 
-  const acceptAiSuggestion = (suggestion, index) => {
+  const acceptAiSuggestion = async (suggestion, index) => {
     // Try to find the exact text in the PDF layer
     const foundText = findTextInPDFLayer(suggestion.text);
     
@@ -776,11 +1014,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
           }
         };
 
-        const pageKey = `page-${currentPage}`;
-        setAnnotations(prev => ({
-          ...prev,
-          [pageKey]: [...(prev[pageKey] || []), aiHighlight]
-        }));
+        await addAnnotation(aiHighlight);
 
         // Remove from suggestions
         setAiSuggestions(prev => prev.filter((_, i) => i !== index));
@@ -809,11 +1043,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       height: 20
     };
 
-    const pageKey = `page-${currentPage}`;
-    setAnnotations(prev => ({
-      ...prev,
-      [pageKey]: [...(prev[pageKey] || []), aiHighlight]
-    }));
+    await addAnnotation(aiHighlight);
 
     // Remove from suggestions
     setAiSuggestions(prev => prev.filter((_, i) => i !== index));
@@ -848,7 +1078,6 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
       
-      const pageKey = `page-${currentPage}`;
       const newHighlight = {
         id: Date.now(),
         type: 'highlight',
@@ -860,10 +1089,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
         isLegacy: true // Mark as legacy click-based
       };
 
-      setAnnotations(prev => ({
-        ...prev,
-        [pageKey]: [...(prev[pageKey] || []), newHighlight]
-      }));
+      addAnnotation(newHighlight);
     }
   };
 
@@ -871,7 +1097,6 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
   const createTextSelectionHighlight = () => {
     if (!selectedText || !selectionCoords) return;
     
-    const pageKey = `page-${currentPage}`;
     const newHighlight = {
       id: Date.now(),
       type: 'highlight',
@@ -891,10 +1116,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       }
     };
 
-    setAnnotations(prev => ({
-      ...prev,
-      [pageKey]: [...(prev[pageKey] || []), newHighlight]
-    }));
+    addAnnotation(newHighlight);
 
     // Clear selection after highlighting
     window.getSelection().removeAllRanges();
@@ -912,7 +1134,6 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     const commentText = prompt('Enter your comment:');
     if (!commentText) return;
 
-    const pageKey = `page-${currentPage}`;
     const newComment = {
       id: Date.now(),
       type: 'comment',
@@ -922,10 +1143,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       color: '#ff6b6b'
     };
 
-    setAnnotations(prev => ({
-      ...prev,
-      [pageKey]: [...(prev[pageKey] || []), newComment]
-    }));
+    addAnnotation(newComment);
   };
 
   // Enhanced sticky note functionality
@@ -951,7 +1169,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     setStickyNoteAttachments([]);
   };
 
-  const saveStickyNote = () => {
+  const saveStickyNote = async () => {
     if (!stickyNoteModal || (!stickyNoteContent.trim() && stickyNoteAttachments.length === 0)) {
       closeStickyNoteModal();
       return;
@@ -988,25 +1206,36 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
         }
       };
 
-      setAnnotations(prev => ({
-        ...prev,
-        [pageKey]: [...(prev[pageKey] || []), newStickyNote]
-      }));
+      await addAnnotation(newStickyNote);
     } else {
       // Update existing sticky note (don't change coordinates, just content)
+      const pageAnnotations = annotations[pageKey] || [];
+      const updatedAnnotations = pageAnnotations.map(annotation => 
+        annotation.id === stickyNoteModal.annotationId
+          ? {
+              ...annotation,
+              content: stickyNoteContent,
+              attachments: stickyNoteAttachments,
+              modifiedAt: new Date().toISOString()
+            }
+          : annotation
+      );
+      
       setAnnotations(prev => ({
         ...prev,
-        [pageKey]: (prev[pageKey] || []).map(annotation => 
-          annotation.id === stickyNoteModal.annotationId
-            ? {
-                ...annotation,
-                content: stickyNoteContent,
-                attachments: stickyNoteAttachments,
-                modifiedAt: new Date().toISOString()
-              }
-            : annotation
-        )
+        [pageKey]: updatedAnnotations
       }));
+      
+      // Save updated annotations to localStorage (user-specific key)
+      try {
+        const userId = user?.id || 'anonymous';
+        const storageKey = `annotations_${userId}_${uploadedFileName || 'unknown'}`;
+        const existingAnnotations = JSON.parse(localStorage.getItem(storageKey) || '{}');
+        existingAnnotations[pageKey] = updatedAnnotations;
+        localStorage.setItem(storageKey, JSON.stringify(existingAnnotations));
+      } catch (error) {
+        console.warn('Failed to save updated annotation to localStorage:', error);
+      }
     }
 
     closeStickyNoteModal();
@@ -1050,6 +1279,63 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [showColorPalette]);
+
+  // Auto-save functionality
+  useEffect(() => {
+    // Load autosave preference
+    const savedPreference = localStorage.getItem('autoSaveEnabled');
+    if (savedPreference !== null) {
+      setAutoSaveEnabled(savedPreference === 'true');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!autoSaveEnabled || !fileId) return;
+
+    // Auto-save annotations every 30 seconds
+    const autoSaveInterval = setInterval(async () => {
+      try {
+        const pageKey = `page-${currentPage}`;
+        const pageAnnotations = annotations[pageKey] || [];
+        
+        // Check if there are any unsaved annotations
+        const hasUnsavedAnnotations = pageAnnotations.some(ann => !ann.synced);
+        
+        if (hasUnsavedAnnotations) {
+          console.log('Auto-saving annotations...');
+          
+          // Save each unsaved annotation
+          for (const annotation of pageAnnotations) {
+            if (!annotation.synced) {
+              try {
+                await saveAnnotation(annotation);
+                // Mark as synced in local state
+                setAnnotations(prev => ({
+                  ...prev,
+                  [pageKey]: prev[pageKey].map(ann => 
+                    ann.id === annotation.id ? { ...ann, synced: true } : ann
+                  )
+                }));
+              } catch (error) {
+                console.warn('Failed to auto-save annotation:', annotation.id, error);
+              }
+            }
+          }
+          
+          // Annotations auto-saved successfully
+          
+          // Show subtle notification if connected to server
+          if (connectionStatus.canSaveToServer) {
+            showToast('Auto-saved', 'success', 1500);
+          }
+        }
+      } catch (error) {
+        console.error('Auto-save failed:', error);
+      }
+    }, 30000); // Every 30 seconds
+
+    return () => clearInterval(autoSaveInterval);
+  }, [autoSaveEnabled, fileId, currentPage, annotations, connectionStatus.canSaveToServer, saveAnnotation, showToast]);
 
   const handleFileAttachment = (event) => {
     const files = Array.from(event.target.files);
@@ -1103,7 +1389,6 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
       
-      const pageKey = `page-${currentPage}`;
       const newUnderline = {
         id: Date.now(),
         type: 'underline',
@@ -1115,10 +1400,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
         isLegacy: true // Mark as legacy click-based
       };
 
-      setAnnotations(prev => ({
-        ...prev,
-        [pageKey]: [...(prev[pageKey] || []), newUnderline]
-      }));
+      addAnnotation(newUnderline);
     }
   };
 
@@ -1126,7 +1408,6 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
   const createTextSelectionUnderline = () => {
     if (!selectedText || !selectionCoords) return;
     
-    const pageKey = `page-${currentPage}`;
     const newUnderline = {
       id: Date.now(),
       type: 'underline',
@@ -1150,10 +1431,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       }
     };
 
-    setAnnotations(prev => ({
-      ...prev,
-      [pageKey]: [...(prev[pageKey] || []), newUnderline]
-    }));
+    addAnnotation(newUnderline);
 
     // Clear selection after underlining
     window.getSelection().removeAllRanges();
@@ -1269,36 +1547,6 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     return Math.sqrt((px - projection.x) ** 2 + (py - projection.y) ** 2);
   };
 
-  // Remove annotation by ID with visual feedback
-  const removeAnnotation = (annotationId, showSuccessMessage = true) => {
-    const pageKey = `page-${currentPage}`;
-    
-    // Show visual feedback before removing
-    const annotationElement = document.querySelector(`[data-annotation-id="${annotationId}"]`);
-    if (annotationElement) {
-      annotationElement.style.transition = 'all 0.3s ease';
-      annotationElement.style.transform = 'scale(0.8)';
-      annotationElement.style.opacity = '0';
-      
-      setTimeout(() => {
-        setAnnotations(prev => ({
-          ...prev,
-          [pageKey]: (prev[pageKey] || []).filter(annotation => annotation.id !== annotationId)
-        }));
-      }, 300);
-    } else {
-      // Fallback immediate removal if element not found
-      setAnnotations(prev => ({
-        ...prev,
-        [pageKey]: (prev[pageKey] || []).filter(annotation => annotation.id !== annotationId)
-      }));
-    }
-    
-    // Show success feedback only if requested
-    if (showSuccessMessage) {
-      showEraseSuccessMessage();
-    }
-  };
 
   // Show success message for erasing
   const showEraseSuccessMessage = () => {
@@ -1342,8 +1590,6 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
     
     setIsDrawing(false);
     if (drawingPath.length > 1) {
-      const pageKey = `page-${currentPage}`;
-      
       // Normalize drawing coordinates relative to text layer
       const normalizedPath = textLayerRef.current ? 
         normalizeDrawingPath(drawingPath, textLayerRef.current) : 
@@ -1367,10 +1613,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
         }
       };
 
-      setAnnotations(prev => ({
-        ...prev,
-        [pageKey]: [...(prev[pageKey] || []), newDrawing]
-      }));
+      addAnnotation(newDrawing);
     }
     setDrawingPath([]);
   };

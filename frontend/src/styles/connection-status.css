@@ -1,0 +1,132 @@
+/* Connection status and save control styles */
+
+.user-menu .menu-item.status {
+  cursor: default;
+  pointer-events: none;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 2px 0;
+}
+
+.user-menu .menu-item.status.text-green-500 {
+  background-color: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+}
+
+.user-menu .menu-item.status.text-yellow-500 {
+  background-color: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+}
+
+.user-menu .menu-item.status.text-orange-500 {
+  background-color: rgba(249, 115, 22, 0.1);
+  color: #f97316;
+}
+
+.user-menu .menu-item.status.text-red-500 {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.user-menu .menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.user-menu .menu-item.active {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.user-menu .menu-item.active:hover {
+  background-color: var(--primary-hover);
+}
+
+/* Save status indicators */
+.save-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+
+.save-status.saving {
+  color: var(--primary-color);
+}
+
+.save-status.saved {
+  color: #22c55e;
+}
+
+.save-status.error {
+  color: #ef4444;
+}
+
+/* Auto-save indicator */
+.autosave-indicator {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 1000;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.3s ease;
+}
+
+.autosave-indicator.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.autosave-indicator.success {
+  background: rgba(34, 197, 94, 0.9);
+}
+
+.autosave-indicator.error {
+  background: rgba(239, 68, 68, 0.9);
+}
+
+/* Pulse animation for saving states */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.saving-indicator {
+  animation: pulse 1.5s infinite;
+}
+
+/* Connection status in header */
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.connection-status.connected {
+  color: #22c55e;
+}
+
+.connection-status.disconnected {
+  color: #ef4444;
+}
+
+.connection-status.degraded {
+  color: #f59e0b;
+}

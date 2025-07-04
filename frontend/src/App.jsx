@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Upload, FileText, Brain, HelpCircle, Focus, TreePine, Clock, Edit } from 'lucide-react';
 import PDFViewer from './components/PDFViewer';
 import Sidebar from './components/Sidebar';
@@ -7,61 +7,112 @@ import FileManager from './components/FileManager';
 import ThemeToggle from './components/ThemeToggle';
 import RenameModal from './components/RenameModal';
 import ToastContainer from './components/Toast';
+import UserMenu from './components/UserMenu';
+import AuthPage from './components/Auth/AuthPage';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider, useToast } from './contexts/ToastContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { saveFile } from './utils/fileStorage';
+import { usePageTrackingAPI } from './utils/pageTrackingAPI';
+import { useHybridAPI } from './utils/hybridAPI';
 import './styles/main-themes.css';
 import './styles/pdf-setup.css';
+import './styles/auth.css';
+import './styles/user-menu.css';
+import './styles/dashboard.css';
+import './styles/connection-status.css';
 
 function AppContent() {
   const { showToast } = useToast();
+  const { isAuthenticated, loading, makeAuthenticatedRequest, user } = useAuth();
+  const pageTrackingAPI = usePageTrackingAPI();
+  const hybridAPI = useHybridAPI();
   const [pdfFile, setPdfFile] = useState(null);
   const [uploadedFileName, setUploadedFileName] = useState(null);
+  const [fileId, setFileId] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [userInactive, setUserInactive] = useState(false);
-  const [lastActivity, setLastActivity] = useState(Date.now());
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [pageTimer, setPageTimer] = useState(0);
+  const [totalDocumentTime, setTotalDocumentTime] = useState(0);
+  const [focusSessionStart, setFocusSessionStart] = useState(null);
+  const [isRestoringSession, setIsRestoringSession] = useState(false);
+  
+  // Use refs to prevent multiple timer intervals
+  const timerIntervalRef = useRef(null);
+  const saveTimeoutRef = useRef(null);
 
-  // Local storage helper functions for page timer (memoized to prevent re-creation)
-  const getPageTimerKey = useCallback((filename, page) => {
-    return `page-timer-${filename}-page-${page}`;
-  }, []);
-
-  const loadPageTimer = useCallback((filename, page) => {
-    if (!filename || !page) return 0;
-    const key = getPageTimerKey(filename, page);
-    const saved = localStorage.getItem(key);
-    return saved ? parseInt(saved, 10) : 0;
-  }, [getPageTimerKey]);
-
-  const savePageTimer = useCallback((filename, page, seconds) => {
-    if (!filename || !page) return;
-    const key = getPageTimerKey(filename, page);
-    localStorage.setItem(key, seconds.toString());
-  }, [getPageTimerKey]);
-
-  // Calculate total time spent on entire PDF
-  const calculateTotalPdfTime = useCallback((filename) => {
-    if (!filename) return 0;
-    let totalSeconds = 0;
-    const prefix = `page-timer-${filename}-page-`;
+  // Enhanced page timer functions with hybrid API and localStorage fallback
+  const loadPageTimer = useCallback(async (fileId, page, fileName = null) => {
+    if (!page) return 0;
     
-    // Iterate through all localStorage keys to find timer entries for this PDF
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith(prefix)) {
-        const savedTime = localStorage.getItem(key);
-        if (savedTime) {
-          totalSeconds += parseInt(savedTime, 10) || 0;
-        }
+    // Try localStorage first for immediate response (user-specific key)
+    let savedTime = 0;
+    if (fileName && user?.id) {
+      try {
+        const timerKey = `pageTimer_${user.id}_${fileName}_${page}`;
+        const storedTime = parseInt(localStorage.getItem(timerKey) || '0', 10);
+        savedTime = storedTime;
+      } catch (error) {
+        console.warn('Failed to load timer from localStorage:', error);
       }
     }
-    return totalSeconds;
-  }, []);
+    
+    // Try database if fileId is available
+    if (fileId) {
+      try {
+        const trackingData = await hybridAPI.getPageTrackingData(fileId, page);
+        const dbTime = trackingData?.total_time_spent || 0;
+        // Use the higher value (database might have more recent data)
+        savedTime = Math.max(savedTime, dbTime);
+      } catch (error) {
+        console.warn('Failed to load page timer from database:', error);
+      }
+    }
+    
+    return savedTime;
+  }, [hybridAPI]);
+
+  const savePageTimer = useCallback(async (fileId, page, seconds, fileName = null) => {
+    if (!page || seconds <= 0) return;
+    
+    // Always save to localStorage first for immediate persistence (user-specific key)
+    if (fileName && user?.id) {
+      try {
+        const timerKey = `pageTimer_${user.id}_${fileName}_${page}`;
+        const currentSaved = parseInt(localStorage.getItem(timerKey) || '0', 10);
+        const newTotal = currentSaved + seconds;
+        localStorage.setItem(timerKey, newTotal.toString());
+      } catch (error) {
+        console.warn('Failed to save timer to localStorage:', error);
+      }
+    }
+    
+    // Try to save to database if fileId is available
+    if (fileId) {
+      try {
+        await hybridAPI.trackTimeSpent(fileId, page, seconds);
+      } catch (error) {
+        console.error('Failed to save page timer to database:', error);
+        // Don't show toast for every failed save to avoid spam
+      }
+    }
+  }, [hybridAPI]);
+
+  // Calculate total time spent on entire PDF
+  const calculateTotalPdfTime = useCallback(async (fileId) => {
+    if (!fileId) return 0;
+    try {
+      const fileProgress = await hybridAPI.getFileProgress(fileId);
+      return fileProgress?.file_info?.total_read_time || 0;
+    } catch (error) {
+      console.warn('Failed to calculate total PDF time:', error);
+      return 0;
+    }
+  }, [hybridAPI]);
 
   // Format timer display (30s, 1m 30s, 5m, etc.)
   const formatTimer = useCallback((seconds) => {
@@ -78,32 +129,49 @@ function AppContent() {
     }
   }, []);
 
-  // Last page tracking functions
-  const getLastPageKey = useCallback((filename) => {
-    return `last-page-${filename}`;
-  }, []);
+  // Enhanced last page tracking functions with hybrid API
+  const loadLastPage = useCallback(async (fileId) => {
+    if (!fileId) return 1;
+    try {
+      const fileProgress = await hybridAPI.getFileProgress(fileId);
+      return fileProgress?.file_info?.last_read_page || fileProgress?.lastReadPage || 1;
+    } catch (error) {
+      console.warn('Failed to load last page:', error);
+      return 1;
+    }
+  }, [hybridAPI]);
 
-  const loadLastPage = useCallback((filename) => {
-    if (!filename) return 1;
-    const key = getLastPageKey(filename);
-    const saved = localStorage.getItem(key);
-    return saved ? parseInt(saved, 10) : 1;
-  }, [getLastPageKey]);
-
-  const saveLastPage = useCallback((filename, page) => {
-    if (!filename || !page) return;
-    const key = getLastPageKey(filename);
-    localStorage.setItem(key, page.toString());
-  }, [getLastPageKey]);
+  const saveLastPage = useCallback(async (fileId, page) => {
+    if (!fileId || !page) return;
+    try {
+      // Track the page visit (this updates last_read_page automatically)
+      await hybridAPI.trackPage(fileId, page, { reading_progress: 100 });
+    } catch (error) {
+      console.error('Failed to save last page:', error);
+      // Don't show toast to avoid spam
+    }
+  }, [hybridAPI]);
 
   // Focus mode activity tracking
   useEffect(() => {
-    if (!focusMode) return;
+    if (!focusMode) {
+      // End focus session if it was active
+      if (focusSessionStart && fileId && currentPage) {
+        const endTime = new Date().toISOString();
+        pageTrackingAPI.recordFocusSession(fileId, currentPage, focusSessionStart, endTime)
+          .catch(error => console.error('Failed to record focus session:', error));
+        setFocusSessionStart(null);
+      }
+      return;
+    }
+
+    // Start focus session
+    const startTime = new Date().toISOString();
+    setFocusSessionStart(startTime);
 
     let inactivityTimer;
     
     const resetInactivityTimer = () => {
-      setLastActivity(Date.now());
       setUserInactive(false);
       clearTimeout(inactivityTimer);
       
@@ -125,59 +193,141 @@ function AppContent() {
         document.removeEventListener(event, resetInactivityTimer, true);
       });
     };
-  }, [focusMode]);
+  }, [focusMode, fileId, currentPage, focusSessionStart, pageTrackingAPI]);
 
-  // Page timer management
+  // Page timer management with improved persistence and interval control
   useEffect(() => {
-    if (!pdfFile || !uploadedFileName || !currentPage) {
+    // Clear any existing timer
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+    
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+
+    if (!pdfFile || !currentPage) {
       setPageTimer(0);
       return;
     }
 
     // Load existing timer for this page
-    const existingTime = loadPageTimer(uploadedFileName, currentPage);
-    setPageTimer(existingTime);
-
-    // Set up timer interval
-    const timerInterval = setInterval(() => {
-      setPageTimer(prevTimer => {
-        const newTimer = prevTimer + 1;
-        // Save to localStorage every 5 seconds to avoid too frequent writes
-        if (newTimer % 5 === 0) {
-          savePageTimer(uploadedFileName, currentPage, newTimer);
-        }
-        return newTimer;
-      });
-    }, 1000);
+    loadPageTimer(fileId, currentPage, uploadedFileName).then(existingTime => {
+      setPageTimer(existingTime);
+      
+      // Only start timer after loading existing time
+      timerIntervalRef.current = setInterval(() => {
+        setPageTimer(prevTimer => {
+          const newTimer = prevTimer + 1;
+          
+          // Save to database/localStorage every 10 seconds for better persistence
+          if (newTimer % 10 === 0) {
+            // Use timeout to avoid blocking the timer
+            if (saveTimeoutRef.current) {
+              clearTimeout(saveTimeoutRef.current);
+            }
+            saveTimeoutRef.current = setTimeout(() => {
+              savePageTimer(fileId, currentPage, 10, uploadedFileName);
+            }, 0);
+          }
+          
+          return newTimer;
+        });
+      }, 1000);
+    });
 
     // Cleanup function
     return () => {
-      clearInterval(timerInterval);
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+      
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      
       // Save final timer value when leaving page
-      if (uploadedFileName && currentPage) {
-        setPageTimer(currentTimer => {
-          savePageTimer(uploadedFileName, currentPage, currentTimer);
-          return currentTimer;
-        });
+      if (currentPage && pageTimer > 0) {
+        const remainingTime = pageTimer % 10;
+        if (remainingTime > 0) {
+          savePageTimer(fileId, currentPage, remainingTime, uploadedFileName);
+        }
       }
     };
-  }, [pdfFile, uploadedFileName, currentPage, loadPageTimer, savePageTimer]); // Include memoized functions
+  }, [pdfFile, fileId, currentPage, uploadedFileName]); // Removed loadPageTimer and savePageTimer from deps to prevent recreation
 
   // Auto-save last page when page changes
   useEffect(() => {
-    if (uploadedFileName && currentPage) {
-      saveLastPage(uploadedFileName, currentPage);
+    if (currentPage && uploadedFileName && user?.id) {
+      // Save to localStorage immediately for fast access (user-specific key)
+      try {
+        const savedPageKey = `lastPage_${user.id}_${uploadedFileName}`;
+        localStorage.setItem(savedPageKey, currentPage.toString());
+      } catch (error) {
+        console.warn('Failed to save current page to localStorage:', error);
+      }
+      
+      // Also save to database if available
+      if (fileId) {
+        saveLastPage(fileId, currentPage);
+      }
     }
-  }, [uploadedFileName, currentPage, saveLastPage]);
+  }, [fileId, currentPage, uploadedFileName, user?.id, saveLastPage]);
 
-  // Save timer when component unmounts 
+  // Update total document time periodically
   useEffect(() => {
-    return () => {
-      if (uploadedFileName && currentPage && pageTimer > 0) {
-        savePageTimer(uploadedFileName, currentPage, pageTimer);
+    if (!fileId) {
+      setTotalDocumentTime(0);
+      return;
+    }
+
+    const updateTotalTime = async () => {
+      try {
+        const totalTime = await calculateTotalPdfTime(fileId);
+        setTotalDocumentTime(totalTime);
+      } catch (error) {
+        console.warn('Failed to update total document time:', error);
       }
     };
-  }, []); // Empty dependency array - only runs on mount/unmount
+
+    updateTotalTime();
+    
+    // Update every 30 seconds
+    const interval = setInterval(updateTotalTime, 30000);
+    
+    return () => clearInterval(interval);
+  }, [fileId, calculateTotalPdfTime]);
+
+  // Save timer when component unmounts or before page unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (uploadedFileName && currentPage && pageTimer > 0 && user?.id) {
+        // Use synchronous localStorage save for page unload (user-specific key)
+        try {
+          const timerKey = `pageTimer_${user.id}_${uploadedFileName}_${currentPage}`;
+          const currentSaved = parseInt(localStorage.getItem(timerKey) || '0', 10);
+          const newTotal = currentSaved + (pageTimer % 10); // Save any remaining time
+          localStorage.setItem(timerKey, newTotal.toString());
+        } catch (error) {
+          console.warn('Failed to save timer on page unload:', error);
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      // Also save on component unmount
+      if (uploadedFileName && currentPage && pageTimer > 0) {
+        savePageTimer(fileId, currentPage, pageTimer % 5, uploadedFileName);
+      }
+    };
+  }, [fileId, uploadedFileName, currentPage, pageTimer, user?.id, savePageTimer]);
 
 const handleFileUpload = async (file) => {
   if (!file || file.type !== 'application/pdf') {
@@ -198,7 +348,7 @@ const handleFileUpload = async (file) => {
 
     console.log('Uploading file:', file.name, 'Size:', file.size);
 
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/upload`, {
+    const response = await makeAuthenticatedRequest(`${import.meta.env.VITE_API_BASE_URL}/api/upload`, {
       method: 'POST',
       body: formData,
     });
@@ -210,12 +360,20 @@ const handleFileUpload = async (file) => {
       // CRITICAL FIX: Use the original File object, not URL
       setPdfFile(file); // Use original file object for react-pdf
       setUploadedFileName(result.file.filename);
+      setFileId(result.file.id); // Store file ID for database operations
       setCurrentPage(1);
       
       // Save file to IndexedDB for future access
       try {
         await saveFile(file, result.file.filename);
         console.log('File saved to local storage for future access');
+        
+        // Initialize current page in localStorage (user-specific key)
+        if (user?.id) {
+          const savedPageKey = `lastPage_${user.id}_${result.file.filename}`;
+          localStorage.setItem(savedPageKey, '1');
+        }
+        
         showToast('PDF uploaded and saved successfully!', 'success');
       } catch (storageError) {
         console.warn('Failed to save file to local storage:', storageError);
@@ -235,18 +393,59 @@ const handleFileUpload = async (file) => {
 };
 
 // Handle loading a previously saved file
-const handleFileLoad = (file, uploadedFileName, metadata) => {
+const handleFileLoad = async (file, uploadedFileName, metadata) => {
   try {
     setPdfFile(file);
     setUploadedFileName(uploadedFileName);
     
-    // Load last page for this file (auto-resume functionality)
-    const lastPage = loadLastPage(uploadedFileName);
-    setCurrentPage(lastPage);
-    setTotalPages(0);
+    // Try to load last page from localStorage first (user-specific key)
+    let lastPage = 1;
+    try {
+      const userId = user?.id;
+      if (userId) {
+        const savedPageKey = `lastPage_${userId}_${uploadedFileName}`;
+        const savedPage = parseInt(localStorage.getItem(savedPageKey), 10);
+        if (savedPage && savedPage > 0) {
+          lastPage = savedPage;
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to load last page from localStorage:', error);
+    }
     
-    console.log(`Loaded saved file: ${metadata.fileName}, resuming at page ${lastPage}`);
-    showToast(`Loaded ${metadata.fileName} - resumed at page ${lastPage}`, 'success');
+    // We need to get the file ID from the database
+    // For now, we'll need to fetch file list to get the ID
+    // This should be improved by storing the ID in metadata
+    const response = await makeAuthenticatedRequest(`${import.meta.env.VITE_API_BASE_URL}/api/files/list`);
+    const result = await response.json();
+    
+    if (result.success) {
+      const fileRecord = result.files.find(f => f.filename === uploadedFileName);
+      if (fileRecord) {
+        setFileId(fileRecord.id);
+        
+        // Load last page for this file (auto-resume functionality)
+        // Try database first, then fallback to localStorage value
+        try {
+          const dbLastPage = await loadLastPage(fileRecord.id);
+          if (dbLastPage && dbLastPage > 0) {
+            lastPage = dbLastPage;
+          }
+        } catch (error) {
+          console.warn('Failed to load last page from database, using localStorage:', error);
+        }
+        
+        setCurrentPage(lastPage);
+        setTotalPages(0);
+        
+        console.log(`Loaded saved file: ${metadata.fileName}, resuming at page ${lastPage}`);
+        showToast(`Loaded ${metadata.fileName} - resumed at page ${lastPage}`, 'success');
+      } else {
+        throw new Error('File not found in database');
+      }
+    } else {
+      throw new Error('Failed to get file list');
+    }
   } catch (error) {
     console.error('Error loading saved file:', error);
     showToast('Error loading file: ' + error.message, 'error');
@@ -267,24 +466,35 @@ const handleFileLoad = (file, uploadedFileName, metadata) => {
 
   const dismissInactivity = () => {
     setUserInactive(false);
-    setLastActivity(Date.now());
   };
 
   // Handle logo click navigation back to upload
   const handleLogoClick = () => {
     if (pdfFile) {
       // Save current state before navigating away
-      if (uploadedFileName && currentPage) {
-        saveLastPage(uploadedFileName, currentPage);
-        savePageTimer(uploadedFileName, currentPage, pageTimer);
+      if (fileId && currentPage) {
+        saveLastPage(fileId, currentPage);
+        if (pageTimer > 0) {
+          savePageTimer(fileId, currentPage, pageTimer % 10, uploadedFileName); // Save remaining time
+        }
+      }
+      
+      // End focus session if active
+      if (focusSessionStart && fileId && currentPage) {
+        const endTime = new Date().toISOString();
+        pageTrackingAPI.recordFocusSession(fileId, currentPage, focusSessionStart, endTime)
+          .catch(error => console.error('Failed to record focus session:', error));
+        setFocusSessionStart(null);
       }
       
       // Clear PDF state to return to upload
       setPdfFile(null);
       setUploadedFileName('');
+      setFileId(null);
       setCurrentPage(1);
       setTotalPages(0);
       setPageTimer(0);
+      setFocusMode(false);
       
       showToast('Returned to upload page', 'info', 2000);
     }
@@ -295,7 +505,7 @@ const handleFileLoad = (file, uploadedFileName, metadata) => {
     if (!uploadedFileName) return;
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/files/rename`, {
+      const response = await makeAuthenticatedRequest(`${import.meta.env.VITE_API_BASE_URL}/api/files/rename`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -309,26 +519,9 @@ const handleFileLoad = (file, uploadedFileName, metadata) => {
       const result = await response.json();
 
       if (result.success) {
-        const oldName = uploadedFileName;
         setUploadedFileName(newName);
         
-        // Update localStorage keys with new filename
-        const oldPageKey = getLastPageKey(oldName);
-        const newPageKey = getLastPageKey(newName);
-        const savedPage = localStorage.getItem(oldPageKey);
-        if (savedPage) {
-          localStorage.setItem(newPageKey, savedPage);
-          localStorage.removeItem(oldPageKey);
-        }
-
-        // Update timer keys
-        const oldTimerKey = getPageTimerKey(oldName, currentPage);
-        const newTimerKey = getPageTimerKey(newName, currentPage);
-        const savedTimer = localStorage.getItem(oldTimerKey);
-        if (savedTimer) {
-          localStorage.setItem(newTimerKey, savedTimer);
-          localStorage.removeItem(oldTimerKey);
-        }
+        // File rename is handled by the database, no localStorage updates needed
 
         showToast(`PDF renamed to "${newName}"`, 'success');
       } else {
@@ -340,6 +533,76 @@ const handleFileLoad = (file, uploadedFileName, metadata) => {
       throw error; // Re-throw to handle in modal
     }
   };
+
+  // Restore session on app startup
+  useEffect(() => {
+    const restoreSession = async () => {
+      if (!isAuthenticated) return;
+      
+      try {
+        setIsRestoringSession(true);
+        
+        // Check if there was a previous session
+        const lastSession = localStorage.getItem('lastSession');
+        if (lastSession) {
+          const sessionData = JSON.parse(lastSession);
+          console.log('Restoring previous session:', sessionData);
+          
+          // If we have session data, try to restore it
+          if (sessionData.fileName && sessionData.page) {
+            showToast(`Restoring session: ${sessionData.fileName} (page ${sessionData.page})`, 'info', 3000);
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to restore session:', error);
+      } finally {
+        setIsRestoringSession(false);
+      }
+    };
+    
+    restoreSession();
+  }, [isAuthenticated, showToast]);
+  
+  // Save session data when state changes
+  useEffect(() => {
+    if (uploadedFileName && currentPage) {
+      try {
+        const sessionData = {
+          fileName: uploadedFileName,
+          page: currentPage,
+          fileId: fileId,
+          timestamp: new Date().toISOString()
+        };
+        localStorage.setItem('lastSession', JSON.stringify(sessionData));
+      } catch (error) {
+        console.warn('Failed to save session data:', error);
+      }
+    }
+  }, [uploadedFileName, currentPage, fileId]);
+
+  // Show loading screen while checking authentication
+  if (loading || isRestoringSession) {
+    return (
+      <ThemeProvider>
+        <div className="loading-screen">
+          <div className="loading-content">
+            <TreePine size={48} className="logo-icon" />
+            <div className="loading-spinner"></div>
+            <p>{isRestoringSession ? 'Restoring your session...' : 'Loading Forest PDF Viewer...'}</p>
+          </div>
+        </div>
+      </ThemeProvider>
+    );
+  }
+
+  // Show authentication page if not logged in
+  if (!isAuthenticated) {
+    return (
+      <ThemeProvider>
+        <AuthPage />
+      </ThemeProvider>
+    );
+  }
 
   return (
     <ThemeProvider>
@@ -384,101 +647,105 @@ const handleFileLoad = (file, uploadedFileName, metadata) => {
             {pdfFile && (
               <div 
                 className="page-timer" 
-                title={`Current page: ${formatTimer(pageTimer)} | Total document: ${formatTimer(calculateTotalPdfTime(uploadedFileName) + pageTimer)}`}
+                title={`Current page: ${formatTimer(pageTimer)} | Total document: ${formatTimer(totalDocumentTime + pageTimer)}`}
               >
                 <Clock size={18} />
                 <span>{formatTimer(pageTimer)}</span>
               </div>
             )}
-          </div>
-        </div>
-      </header>
 
-      {/* Main Content */}
-      <div className="main-content">
-        {!pdfFile ? (
-          /* Upload Section with File Manager */
-          <div className="upload-section">
-            <FileManager onFileLoad={handleFileLoad} />
-            
-            <div
-              className="upload-area"
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-            >
-            <div className="upload-content">
-              <div className="upload-icon-container">
-                <Upload size={64} className="upload-icon" />
-                <FileText size={32} className="pdf-icon" />
+            <UserMenu />
+            </div>
+          </div>
+        </header>
+
+        {/* Main Content */}
+        <div className="main-content">
+          {!pdfFile ? (
+            /* Upload Section with File Manager */
+            <div className="upload-section">
+              <FileManager onFileLoad={handleFileLoad} />
+              
+              <div
+                className="upload-area"
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+              >
+                <div className="upload-content">
+                  <div className="upload-icon-container">
+                    <Upload size={64} className="upload-icon" />
+                    <FileText size={32} className="pdf-icon" />
+                  </div>
+                  
+                  <h2>Upload Your PDF</h2>
+                  <p>Drag and drop your PDF file here, or click to browse</p>
+                  <p className="upload-limit">Maximum file size: 100MB • Up to 500 pages</p>
+                  
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    onChange={(e) => e.target.files[0] && handleFileUpload(e.target.files[0])}
+                    className="file-input"
+                    id="pdf-upload"
+                    disabled={isUploading}
+                  />
+                  
+                  <label 
+                    htmlFor="pdf-upload" 
+                    className={`upload-button ${isUploading ? 'uploading' : ''}`}
+                  >
+                    {isUploading ? 'Uploading...' : 'Choose PDF File'}
+                  </label>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* PDF Viewer Layout */
+            <div className="viewer-layout">
+              <div className="pdf-container">
+                <PDFViewer
+                  file={pdfFile}
+                  currentPage={currentPage}
+                  onPageChange={setCurrentPage}
+                  onLoadSuccess={(pdf) => setTotalPages(pdf.numPages)}
+                  uploadedFileName={uploadedFileName}
+                  fileId={fileId}
+                />
               </div>
               
-              <h2>Upload Your PDF</h2>
-              <p>Drag and drop your PDF file here, or click to browse</p>
-              <p className="upload-limit">Maximum file size: 100MB • Up to 500 pages</p>
-              
-              <input
-                type="file"
-                accept=".pdf"
-                onChange={(e) => e.target.files[0] && handleFileUpload(e.target.files[0])}
-                className="file-input"
-                id="pdf-upload"
-                disabled={isUploading}
-              />
-              
-              <label 
-                htmlFor="pdf-upload" 
-                className={`upload-button ${isUploading ? 'uploading' : ''}`}
-              >
-                {isUploading ? 'Uploading...' : 'Choose PDF File'}
-              </label>
-            </div>
-          </div>
-          </div>
-        ) : (
-          /* PDF Viewer Layout */
-          <div className="viewer-layout">
-            <div className="pdf-container">
-              <PDFViewer
-                file={pdfFile}
-                currentPage={currentPage}
-                onPageChange={setCurrentPage}
-                onLoadSuccess={(pdf) => setTotalPages(pdf.numPages)}
+              <Sidebar
                 uploadedFileName={uploadedFileName}
+                fileId={fileId}
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
               />
             </div>
-            
-            <Sidebar
-              uploadedFileName={uploadedFileName}
-              currentPage={currentPage}
-              totalPages={totalPages}
-              onPageChange={setCurrentPage}
-            />
+          )}
+        </div>
+
+        {/* Rename Modal */}
+        <RenameModal
+          isOpen={isRenameModalOpen}
+          onClose={() => setIsRenameModalOpen(false)}
+          currentName={uploadedFileName}
+          onRename={handleRename}
+        />
+
+        {/* Focus Mode Overlay */}
+        {focusMode && userInactive && (
+          <FocusMode onDismiss={dismissInactivity} />
+        )}
+
+        {/* Loading Overlay */}
+        {isUploading && (
+          <div className="loading-overlay">
+            <div className="loading-content">
+              <div className="loading-spinner"></div>
+              <p>Uploading your PDF...</p>
+            </div>
           </div>
         )}
-      </div>
-
-      {/* Rename Modal */}
-      <RenameModal
-        isOpen={isRenameModalOpen}
-        onClose={() => setIsRenameModalOpen(false)}
-        currentName={uploadedFileName}
-        onRename={handleRename}
-      />
-
-      {/* Focus Mode Overlay */}
-      {focusMode && userInactive && (
-        <FocusMode onDismiss={dismissInactivity} />
-      )}
-
-      {/* Loading Overlay */}
-      {isUploading && (
-        <div className="loading-overlay">
-          <div className="loading-content">
-            <div className="loading-spinner"></div>
-            <p>Uploading your PDF...</p>
-          </div>
-        </div>
-      )}
       </div>
     </ThemeProvider>
   );
@@ -487,8 +754,10 @@ const handleFileLoad = (file, uploadedFileName, metadata) => {
 function App() {
   return (
     <ToastProvider>
-      <AppContent />
-      <ToastContainer />
+      <AuthProvider>
+        <AppContent />
+        <ToastContainer />
+      </AuthProvider>
     </ToastProvider>
   );
 }
