@@ -336,14 +336,14 @@ router.get('/stats', authenticateToken, async (req, res) => {
         if (start_date) {
             whereConditions.created_at = {
                 ...whereConditions.created_at,
-                [require('sequelize').Op.gte]: new Date(start_date)
+                $gte: new Date(start_date)
             };
         }
 
         if (end_date) {
             whereConditions.created_at = {
                 ...whereConditions.created_at,
-                [require('sequelize').Op.lte]: new Date(end_date)
+                $lte: new Date(end_date)
             };
         }
 

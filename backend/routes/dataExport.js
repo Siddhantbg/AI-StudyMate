@@ -234,14 +234,14 @@ router.get('/reading-analytics', async (req, res) => {
     if (start_date) {
       whereConditions.last_visit = {
         ...whereConditions.last_visit,
-        [require('sequelize').Op.gte]: new Date(start_date)
+        $gte: new Date(start_date)
       };
     }
 
     if (end_date) {
       whereConditions.last_visit = {
         ...whereConditions.last_visit,
-        [require('sequelize').Op.lte]: new Date(end_date)
+        $lte: new Date(end_date)
       };
     }
 

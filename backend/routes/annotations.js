@@ -521,34 +521,31 @@ router.get('/search', async (req, res) => {
     if (type) whereConditions.annotation_type = type;
     if (page_number) whereConditions.page_number = parseInt(page_number);
 
-    // Search in content, selected_text, and tags
-    const { Op } = require('sequelize');
-    whereConditions[Op.or] = [
-      { content: { [Op.iLike]: `%${q}%` } },
-      { selected_text: { [Op.iLike]: `%${q}%` } },
-      { tags: { [Op.contains]: [q] } }
-    ];
+    // Search in content, selected_text, and tags using MongoDB syntax
+    if (q) {
+      whereConditions.$or = [
+        { content: { $regex: q, $options: 'i' } },
+        { selected_text: { $regex: q, $options: 'i' } },
+        { tags: { $in: [q] } }
+      ];
+    }
 
-    const annotations = await Annotation.findAndCountAll({
-      where: whereConditions,
-      include: [{
-        model: File,
-        as: 'file',
-        attributes: ['id', 'display_name', 'original_name']
-      }],
-      order: [['created_at', 'DESC']],
-      limit: parseInt(limit),
-      offset: parseInt(offset)
-    });
+    const annotations = await Annotation.find(whereConditions)
+      .populate('file_id', 'display_name original_name')
+      .sort({ created_at: -1 })
+      .limit(parseInt(limit))
+      .skip(parseInt(offset));
+    
+    const total = await Annotation.countDocuments(whereConditions);
 
     res.json({
       success: true,
       data: {
-        annotations: annotations.rows.map(annotation => ({
+        annotations: annotations.map(annotation => ({
           ...annotation.getPublicData(),
-          file: annotation.file
+          file: annotation.file_id
         })),
-        total_count: annotations.count,
+        total_count: total,
         limit: parseInt(limit),
         offset: parseInt(offset)
       }

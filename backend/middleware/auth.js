@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
-const { User, UserSession } = require('../models');
+const User = require('../models/mongodb/User');
+const UserSession = require('../models/mongodb/UserSession');
 
 /**
  * Authentication Middleware
@@ -13,12 +14,12 @@ const { User, UserSession } = require('../models');
  */
 const generateAccessToken = (userId) => {
   return jwt.sign(
-    { userId, type: 'access' },
+    { userId: userId.toString(), type: 'access' },
     process.env.JWT_SECRET,
     { 
       expiresIn: process.env.JWT_EXPIRES_IN || '7d',
       issuer: 'forest-pdf-viewer',
-      subject: userId
+      subject: userId.toString()
     }
   );
 };
@@ -28,12 +29,12 @@ const generateAccessToken = (userId) => {
  */
 const generateRefreshToken = (userId) => {
   return jwt.sign(
-    { userId, type: 'refresh' },
+    { userId: userId.toString(), type: 'refresh' },
     process.env.JWT_REFRESH_SECRET,
     { 
       expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
       issuer: 'forest-pdf-viewer',
-      subject: userId
+      subject: userId.toString()
     }
   );
 };
@@ -103,7 +104,7 @@ const authenticateToken = async (req, res, next) => {
     }
 
     // Find the user
-    const user = await User.findByPk(decoded.userId);
+    const user = await User.findById(decoded.userId);
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -133,7 +134,7 @@ const authenticateToken = async (req, res, next) => {
 
     // Check if session is expired
     if (session.isExpired()) {
-      await session.deactivate('expired');
+      await session.logout();
       return res.status(401).json({
         success: false,
         error: 'Session expired',
@@ -147,7 +148,7 @@ const authenticateToken = async (req, res, next) => {
     // Attach user and session to request
     req.user = user;
     req.session = session;
-    req.userId = user.id;
+    req.userId = user._id;
 
     next();
   } catch (error) {
@@ -199,8 +200,8 @@ const optionalAuth = async (req, res, next) => {
  */
 const createUserSession = async (user, deviceInfo = {}, req = null) => {
   try {
-    const accessToken = generateAccessToken(user.id);
-    const refreshToken = generateRefreshToken(user.id);
+    const accessToken = generateAccessToken(user._id);
+    const refreshToken = generateRefreshToken(user._id);
     
     // Calculate expiration dates
     const accessExpiresAt = new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)); // 7 days
@@ -214,16 +215,14 @@ const createUserSession = async (user, deviceInfo = {}, req = null) => {
     };
 
     // Create session record
-    const session = await UserSession.create({
-      user_id: user.id,
+    const session = new UserSession({
+      user_id: user._id,
       session_token: accessToken,
       refresh_token: refreshToken,
       device_info: sessionDeviceInfo,
-      expires_at: accessExpiresAt,
-      refresh_expires_at: refreshExpiresAt,
-      ip_address: req?.ip || req?.connection?.remoteAddress,
-      user_agent: req?.headers['user-agent']
+      expires_at: accessExpiresAt
     });
+    await session.save();
 
     // Update user's last login
     await user.updateLastLogin();
@@ -233,7 +232,7 @@ const createUserSession = async (user, deviceInfo = {}, req = null) => {
       refresh_token: refreshToken,
       expires_at: accessExpiresAt,
       refresh_expires_at: refreshExpiresAt,
-      session_id: session.id,
+      session_id: session._id,
       user: user.getPublicProfile()
     };
   } catch (error) {
@@ -256,30 +255,28 @@ const refreshAccessToken = async (refreshToken) => {
 
     // Find session by refresh token
     const session = await UserSession.findByRefreshToken(refreshToken);
-    if (!session || session.isRefreshExpired()) {
+    if (!session || session.isExpired()) {
       throw new Error('Refresh token expired or invalid');
     }
 
     // Find user
-    const user = await User.findByPk(decoded.userId);
+    const user = await User.findById(decoded.userId);
     if (!user || !user.is_active) {
       throw new Error('User not found or disabled');
     }
 
     // Generate new tokens
-    const newAccessToken = generateAccessToken(user.id);
-    const newRefreshToken = generateRefreshToken(user.id);
+    const newAccessToken = generateAccessToken(user._id);
+    const newRefreshToken = generateRefreshToken(user._id);
     
     const newAccessExpiresAt = new Date(Date.now() + (7 * 24 * 60 * 60 * 1000));
     const newRefreshExpiresAt = new Date(Date.now() + (30 * 24 * 60 * 60 * 1000));
 
     // Update session
-    await session.refreshSession(
-      newAccessToken,
-      newRefreshToken,
-      newAccessExpiresAt,
-      newRefreshExpiresAt
-    );
+    session.session_token = newAccessToken;
+    session.refresh_token = newRefreshToken;
+    session.expires_at = newAccessExpiresAt;
+    await session.save();
 
     return {
       access_token: newAccessToken,
@@ -300,7 +297,7 @@ const refreshAccessToken = async (refreshToken) => {
 const logoutUser = async (req) => {
   try {
     if (req.session) {
-      await req.session.deactivate('manual');
+      await req.session.logout();
     }
     return true;
   } catch (error) {
@@ -314,7 +311,10 @@ const logoutUser = async (req) => {
  */
 const logoutUserFromAllSessions = async (userId) => {
   try {
-    await UserSession.deactivateAllUserSessions(userId, 'forced');
+    await UserSession.updateMany(
+      { user_id: userId, is_active: true },
+      { is_active: false, logout_time: new Date() }
+    );
     return true;
   } catch (error) {
     console.error('Error during logout from all sessions:', error);
@@ -328,8 +328,8 @@ const logoutUserFromAllSessions = async (userId) => {
 const cleanupExpiredSessions = async () => {
   try {
     const result = await UserSession.cleanupExpiredSessions();
-    console.log(`Cleaned up ${result[0]} expired sessions`);
-    return result[0];
+    console.log(`Cleaned up ${result} expired sessions`);
+    return result;
   } catch (error) {
     console.error('Error cleaning up expired sessions:', error);
     return 0;

@@ -1,0 +1,379 @@
+/* ProcessingStatus Component Styles */
+
+.processing-status {
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--background-color, #ffffff);
+  transition: all 0.3s ease;
+}
+
+.processing-status.compact {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+}
+
+/* Status variants */
+.processing-status.pending {
+  border-color: #ffa500;
+  background: #fff8e7;
+}
+
+.processing-status.processing {
+  border-color: #2196f3;
+  background: #e3f2fd;
+}
+
+.processing-status.completed {
+  border-color: #4caf50;
+  background: #e8f5e8;
+}
+
+.processing-status.failed {
+  border-color: #f44336;
+  background: #ffebee;
+}
+
+.processing-status.unknown {
+  border-color: #9e9e9e;
+  background: #f5f5f5;
+}
+
+/* Dark theme support */
+@media (prefers-color-scheme: dark) {
+  .processing-status {
+    background: var(--background-color-dark, #2d2d2d);
+    border-color: var(--border-color-dark, #404040);
+    color: var(--text-color-dark, #ffffff);
+  }
+
+  .processing-status.pending {
+    background: rgba(255, 165, 0, 0.1);
+    border-color: #ffa500;
+  }
+
+  .processing-status.processing {
+    background: rgba(33, 150, 243, 0.1);
+    border-color: #2196f3;
+  }
+
+  .processing-status.completed {
+    background: rgba(76, 175, 80, 0.1);
+    border-color: #4caf50;
+  }
+
+  .processing-status.failed {
+    background: rgba(244, 67, 54, 0.1);
+    border-color: #f44336;
+  }
+
+  .processing-status.unknown {
+    background: rgba(158, 158, 158, 0.1);
+    border-color: #9e9e9e;
+  }
+}
+
+/* Status header */
+.status-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.processing-status.compact .status-header {
+  margin-bottom: 0;
+}
+
+/* Status icons */
+.status-icon,
+.processing-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.status-icon.completed {
+  color: #4caf50;
+}
+
+.status-icon.failed {
+  color: #f44336;
+}
+
+.status-icon.processing,
+.processing-icon {
+  color: #2196f3;
+}
+
+.status-icon.pending {
+  color: #ffa500;
+}
+
+.status-icon.unknown {
+  color: #9e9e9e;
+}
+
+/* Spinning animation */
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Status info */
+.status-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.status-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+  color: var(--text-color, #333333);
+}
+
+.status-message {
+  font-size: 13px;
+  color: var(--text-secondary, #666666);
+  line-height: 1.4;
+}
+
+.processing-status.compact .status-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-color, #333333);
+}
+
+/* Processing details */
+.processing-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: var(--background-secondary, #f9f9f9);
+  border-radius: 6px;
+  border: 1px solid var(--border-light, #f0f0f0);
+}
+
+@media (prefers-color-scheme: dark) {
+  .processing-details {
+    background: var(--background-secondary-dark, #3d3d3d);
+    border-color: var(--border-light-dark, #505050);
+  }
+}
+
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.detail-label {
+  color: var(--text-secondary, #666666);
+  font-weight: 500;
+}
+
+.detail-value {
+  color: var(--text-color, #333333);
+  font-weight: 600;
+}
+
+/* Error message */
+.error-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #ffebee;
+  border: 1px solid #ffcdd2;
+  border-radius: 6px;
+  color: #d32f2f;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .error-message {
+    background: rgba(244, 67, 54, 0.1);
+    border-color: rgba(244, 67, 54, 0.3);
+    color: #ff6b6b;
+  }
+}
+
+/* Status controls */
+.status-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.processing-status.compact .status-controls {
+  margin-left: auto;
+}
+
+.control-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 6px;
+  background: var(--background-color, #ffffff);
+  color: var(--text-color, #333333);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.control-btn:hover {
+  background: var(--background-hover, #f5f5f5);
+  border-color: var(--border-hover, #d0d0d0);
+}
+
+.control-btn:active {
+  transform: translateY(1px);
+}
+
+/* Control button variants */
+.control-btn.retry {
+  color: #ff9800;
+  border-color: #ffcc02;
+}
+
+.control-btn.retry:hover {
+  background: #fff8e1;
+  border-color: #ff9800;
+}
+
+.control-btn.trigger {
+  color: #4caf50;
+  border-color: #81c784;
+}
+
+.control-btn.trigger:hover {
+  background: #e8f5e8;
+  border-color: #4caf50;
+}
+
+.control-btn.refresh {
+  color: #2196f3;
+  border-color: #64b5f6;
+}
+
+.control-btn.refresh:hover {
+  background: #e3f2fd;
+  border-color: #2196f3;
+}
+
+.control-btn.stop {
+  color: #f44336;
+  border-color: #e57373;
+}
+
+.control-btn.stop:hover {
+  background: #ffebee;
+  border-color: #f44336;
+}
+
+.control-btn.start {
+  color: #9c27b0;
+  border-color: #ba68c8;
+}
+
+.control-btn.start:hover {
+  background: #f3e5f5;
+  border-color: #9c27b0;
+}
+
+/* Compact controls */
+.processing-status.compact .control-btn {
+  padding: 4px;
+  border-radius: 4px;
+  min-width: unset;
+}
+
+.processing-status.compact .control-btn:hover {
+  transform: scale(1.1);
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .processing-status {
+    padding: 12px;
+  }
+
+  .status-header {
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .processing-details {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .control-btn {
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+
+  .status-controls {
+    gap: 6px;
+  }
+}
+
+/* Animation for status changes */
+.processing-status {
+  animation: statusFadeIn 0.3s ease-in-out;
+}
+
+@keyframes statusFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Loading state */
+.processing-status:not(.compact).processing {
+  position: relative;
+}
+
+.processing-status:not(.compact).processing::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, #2196f3, transparent);
+  animation: progressSlide 2s linear infinite;
+}
+
+@keyframes progressSlide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}

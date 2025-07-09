@@ -1,5 +1,5 @@
 const express = require('express');
-const { sequelize } = require('../models');
+const { mongoose } = require('../models');
 
 const router = express.Router();
 
@@ -20,12 +20,13 @@ router.get('/', async (req, res) => {
 
   try {
     // Test database connection
-    await sequelize.authenticate();
+    await mongoose.connection.db.admin().ping();
     healthStatus.database = 'connected';
     
     // Get database info
-    const dbVersion = await sequelize.query('SELECT version()');
-    healthStatus.databaseVersion = dbVersion[0][0]?.version || 'unknown';
+    const dbStats = await mongoose.connection.db.stats();
+    healthStatus.databaseVersion = dbStats.version || 'MongoDB';
+    healthStatus.databaseName = mongoose.connection.name;
     
     res.status(200).json({
       success: true,
@@ -60,12 +61,12 @@ router.get('/detailed', async (req, res) => {
 
   // Check database
   try {
-    await sequelize.authenticate();
+    await mongoose.connection.db.admin().ping();
     components.database.status = 'healthy';
     
-    // Test a simple query
-    const result = await sequelize.query('SELECT 1 as test');
-    components.database.testQuery = result[0][0]?.test === 1;
+    // Test a simple operation
+    const collections = await mongoose.connection.db.listCollections().toArray();
+    components.database.collections = collections.length;
   } catch (error) {
     components.database.status = 'error';
     components.database.error = error.message;

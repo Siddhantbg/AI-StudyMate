@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
-const { User } = require('../models');
+const User = require('../models/mongodb/User');
 const { 
   createUserSession, 
   refreshAccessToken, 
@@ -435,7 +435,7 @@ router.put('/change-password', authenticateToken, changePasswordValidation, asyn
  */
 router.get('/sessions', authenticateToken, async (req, res) => {
   try {
-    const { UserSession } = require('../models');
+    const UserSession = require('../models/mongodb/UserSession');
     const sessions = await UserSession.getUserActiveSessions(req.userId);
 
     res.json({
@@ -463,15 +463,13 @@ router.get('/sessions', authenticateToken, async (req, res) => {
  */
 router.delete('/sessions/:sessionId', authenticateToken, async (req, res) => {
   try {
-    const { UserSession } = require('../models');
+    const UserSession = require('../models/mongodb/UserSession');
     const { sessionId } = req.params;
 
     const session = await UserSession.findOne({
-      where: {
-        id: sessionId,
-        user_id: req.userId,
-        is_active: true
-      }
+      _id: sessionId,
+      user_id: req.userId,
+      is_active: true
     });
 
     if (!session) {

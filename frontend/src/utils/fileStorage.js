@@ -24,6 +24,21 @@ const initDB = () => {
   });
 };
 
+// Recreate database if corrupted
+const recreateDatabase = () => {
+  return new Promise((resolve, reject) => {
+    // Delete existing database
+    const deleteRequest = indexedDB.deleteDatabase(DB_NAME);
+    
+    deleteRequest.onerror = () => reject(deleteRequest.error);
+    deleteRequest.onsuccess = () => {
+      console.log('Database deleted successfully');
+      // Reinitialize the database
+      initDB().then(resolve).catch(reject);
+    };
+  });
+};
+
 // Save file to IndexedDB
 export const saveFile = async (file, uploadedFileName) => {
   try {
@@ -63,6 +78,14 @@ export const saveFile = async (file, uploadedFileName) => {
 export const getSavedFiles = async () => {
   try {
     const db = await initDB();
+    
+    // Check if object store exists
+    if (!db.objectStoreNames.contains(STORE_NAME)) {
+      console.log('Object store not found, recreating database...');
+      await recreateDatabase();
+      return [];
+    }
+    
     const transaction = db.transaction([STORE_NAME], 'readonly');
     const store = transaction.objectStore(STORE_NAME);
     const request = store.getAll();
@@ -83,6 +106,12 @@ export const getSavedFiles = async () => {
     });
   } catch (error) {
     console.error('Error getting saved files:', error);
+    // Try to recreate database if it's corrupted
+    try {
+      await recreateDatabase();
+    } catch (recreateError) {
+      console.error('Error recreating database:', recreateError);
+    }
     return [];
   }
 };
@@ -162,7 +191,28 @@ export const formatFileSize = (bytes) => {
 // Get files from server
 export const getServerFiles = async () => {
   try {
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/files`);
+    const token = localStorage.getItem('token');
+    
+    if (!token) {
+      console.log('No authentication token found');
+      return [];
+    }
+    
+    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/files`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      if (response.status === 401) {
+        console.log('Authentication required for server files');
+        return [];
+      }
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
     const result = await response.json();
     
     if (result.success) {
