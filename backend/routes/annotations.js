@@ -1,398 +1,262 @@
 const express = require('express');
-const { body, param, validationResult } = require('express-validator');
-const { Annotation, File } = require('../models');
+const router = express.Router();
+const mongoose = require('mongoose');
+const Annotation = require('../models/mongodb/Annotation');
+const File = require('../models/mongodb/File');
 const { authenticateToken } = require('../middleware/auth');
 
-const router = express.Router();
-
-// Apply authentication to all annotation routes
+// Apply authentication middleware to all annotation routes
 router.use(authenticateToken);
 
-// Validation rules
-const createAnnotationValidation = [
-  body('file_id')
-    .isUUID()
-    .withMessage('Valid file ID is required'),
-  body('page_number')
-    .isInt({ min: 1 })
-    .withMessage('Page number must be a positive integer'),
-  body('annotation_type')
-    .isIn(['highlight', 'underline', 'stickynote', 'drawing', 'comment'])
-    .withMessage('Invalid annotation type'),
-  body('coordinates')
-    .optional()
-    .isObject()
-    .withMessage('Coordinates must be an object'),
-  body('content')
-    .optional()
-    .isString()
-    .isLength({ max: 10000 })
-    .withMessage('Content must be a string with max 10000 characters'),
-  body('selected_text')
-    .optional()
-    .isString()
-    .isLength({ max: 5000 })
-    .withMessage('Selected text must be a string with max 5000 characters'),
-  body('color')
-    .optional()
-    .matches(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/)
-    .withMessage('Color must be a valid hex color'),
-  body('attachments')
-    .optional()
-    .isArray()
-    .withMessage('Attachments must be an array'),
-  body('tags')
-    .optional()
-    .isArray()
-    .withMessage('Tags must be an array')
-];
-
-const updateAnnotationValidation = [
-  param('annotationId')
-    .isUUID()
-    .withMessage('Valid annotation ID is required'),
-  body('content')
-    .optional()
-    .isString()
-    .isLength({ max: 10000 })
-    .withMessage('Content must be a string with max 10000 characters'),
-  body('color')
-    .optional()
-    .matches(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/)
-    .withMessage('Color must be a valid hex color'),
-  body('attachments')
-    .optional()
-    .isArray()
-    .withMessage('Attachments must be an array'),
-  body('tags')
-    .optional()
-    .isArray()
-    .withMessage('Tags must be an array')
-];
-
-/**
- * @route   GET /api/annotations/file/:fileId
- * @desc    Get all annotations for a specific file (user-specific)
- * @access  Private
- */
-router.get('/file/:fileId', [
-  param('fileId').isUUID().withMessage('Valid file ID is required')
-], async (req, res) => {
+// Get annotations for a specific file and page
+router.get('/file/:fileId/page/:pageNumber', async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
+    const { fileId, pageNumber } = req.params;
+    const userId = req.userId;
+
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(fileId)) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
-        details: errors.array(),
-        code: 'VALIDATION_ERROR'
+        error: 'Invalid file ID format'
       });
     }
 
-    const { fileId } = req.params;
+    // Validate page number
+    const page = parseInt(pageNumber);
+    if (isNaN(page) || page < 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid page number'
+      });
+    }
 
-    // Verify user owns this file
+    // Check if user has access to this file
     const file = await File.findOne({
-      where: {
-        id: fileId,
-        user_id: req.userId
-      }
+      _id: fileId,
+      user_id: userId
     });
 
     if (!file) {
       return res.status(404).json({
         success: false,
-        error: 'File not found or access denied',
-        code: 'FILE_NOT_FOUND'
+        error: 'File not found or access denied'
       });
     }
 
-    // Get all annotations for this file by this user
-    const annotations = await Annotation.findByFileAndUser(fileId, req.userId);
-
-    // Group annotations by page
-    const annotationsByPage = {};
-    annotations.forEach(annotation => {
-      const pageKey = `page-${annotation.page_number}`;
-      if (!annotationsByPage[pageKey]) {
-        annotationsByPage[pageKey] = [];
-      }
-      annotationsByPage[pageKey].push(annotation.getPublicData());
-    });
+    // Get annotations for this file and page
+    const annotations = await Annotation.findByFilePage(fileId, page);
 
     res.json({
       success: true,
-      data: {
-        file_id: fileId,
-        annotations: annotationsByPage,
-        total_count: annotations.length
-      }
+      data: annotations.map(annotation => annotation.getPublicData())
     });
 
   } catch (error) {
     console.error('Get annotations error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to get annotations',
-      code: 'GET_ANNOTATIONS_ERROR'
+      error: 'Failed to get annotations'
     });
   }
 });
 
-/**
- * @route   GET /api/annotations/file/:fileId/page/:pageNumber
- * @desc    Get annotations for a specific page
- * @access  Private
- */
-router.get('/file/:fileId/page/:pageNumber', [
-  param('fileId').isUUID().withMessage('Valid file ID is required'),
-  param('pageNumber').isInt({ min: 1 }).withMessage('Valid page number is required')
-], async (req, res) => {
+// Get all annotations for a file
+router.get('/file/:fileId', async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
+    const { fileId } = req.params;
+    const userId = req.userId;
+
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(fileId)) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
-        details: errors.array(),
-        code: 'VALIDATION_ERROR'
+        error: 'Invalid file ID format'
       });
     }
 
-    const { fileId, pageNumber } = req.params;
-
-    // Verify user owns this file
+    // Check if user has access to this file
     const file = await File.findOne({
-      where: {
-        id: fileId,
-        user_id: req.userId
-      }
+      _id: fileId,
+      user_id: userId
     });
 
     if (!file) {
       return res.status(404).json({
         success: false,
-        error: 'File not found or access denied',
-        code: 'FILE_NOT_FOUND'
+        error: 'File not found or access denied'
       });
     }
 
-    // Get annotations for this specific page
-    const annotations = await Annotation.findAll({
-      where: {
-        file_id: fileId,
-        user_id: req.userId,
-        page_number: parseInt(pageNumber),
-        is_deleted: false
-      },
-      order: [['created_at', 'ASC']]
-    });
+    // Get all annotations for this file
+    const annotations = await Annotation.findByFileAndUser(fileId, userId);
 
     res.json({
       success: true,
-      data: {
-        file_id: fileId,
-        page_number: parseInt(pageNumber),
-        annotations: annotations.map(annotation => annotation.getPublicData()),
-        count: annotations.length
-      }
+      data: annotations.map(annotation => annotation.getPublicData())
     });
 
   } catch (error) {
-    console.error('Get page annotations error:', error);
+    console.error('Get file annotations error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to get page annotations',
-      code: 'GET_PAGE_ANNOTATIONS_ERROR'
+      error: 'Failed to get file annotations'
     });
   }
 });
 
-/**
- * @route   POST /api/annotations
- * @desc    Create a new annotation
- * @access  Private
- */
-router.post('/', createAnnotationValidation, async (req, res) => {
+// Create a new annotation
+router.post('/', async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
+    const userId = req.userId;
+    const annotationData = req.body;
+
+    // Validate required fields
+    if (!annotationData.file_id || !annotationData.page_number || !annotationData.annotation_type) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
-        details: errors.array(),
-        code: 'VALIDATION_ERROR'
+        error: 'Missing required fields: file_id, page_number, annotation_type'
       });
     }
 
-    const {
-      file_id,
-      page_number,
-      annotation_type,
-      coordinates,
-      content,
-      selected_text,
-      color,
-      attachments,
-      style_properties,
-      ai_generated,
-      ai_metadata,
-      is_text_selection,
-      coordinate_version,
-      metadata,
-      tags
-    } = req.body;
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(annotationData.file_id)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid file ID format'
+      });
+    }
 
-    // Verify user owns this file
+    // Check if user has access to this file
     const file = await File.findOne({
-      where: {
-        id: file_id,
-        user_id: req.userId
-      }
+      _id: annotationData.file_id,
+      user_id: userId
     });
 
     if (!file) {
       return res.status(404).json({
         success: false,
-        error: 'File not found or access denied',
-        code: 'FILE_NOT_FOUND'
+        error: 'File not found or access denied'
       });
     }
 
     // Create annotation
-    const annotation = await Annotation.create({
-      user_id: req.userId,
-      file_id,
-      page_number,
-      annotation_type,
-      coordinates,
-      content,
-      selected_text,
-      color: color || '#ffff00', // Default yellow
-      attachments: attachments || [],
-      style_properties: style_properties || {},
-      ai_generated: ai_generated || false,
-      ai_metadata,
-      is_text_selection: is_text_selection || false,
-      coordinate_version: coordinate_version || '2.0',
-      metadata: metadata || {},
-      tags: tags || []
+    const annotation = new Annotation({
+      user_id: userId,
+      file_id: annotationData.file_id,
+      page_number: annotationData.page_number,
+      annotation_type: annotationData.annotation_type,
+      coordinates: annotationData.coordinates,
+      content: annotationData.content,
+      selected_text: annotationData.selected_text,
+      color: annotationData.color,
+      style_properties: annotationData.style_properties,
+      ai_generated: annotationData.ai_generated || false,
+      ai_metadata: annotationData.ai_metadata,
+      is_text_selection: annotationData.is_text_selection || false,
+      coordinate_version: annotationData.coordinate_version || '2.0',
+      metadata: annotationData.metadata,
+      tags: annotationData.tags || []
     });
 
-    res.status(201).json({
+    const savedAnnotation = await annotation.save();
+
+    res.json({
       success: true,
-      message: 'Annotation created successfully',
-      data: annotation.getPublicData()
+      data: savedAnnotation.getPublicData()
     });
 
   } catch (error) {
     console.error('Create annotation error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to create annotation',
-      code: 'CREATE_ANNOTATION_ERROR'
+      error: 'Failed to create annotation'
     });
   }
 });
 
-/**
- * @route   PUT /api/annotations/:annotationId
- * @desc    Update an annotation
- * @access  Private
- */
-router.put('/:annotationId', updateAnnotationValidation, async (req, res) => {
+// Update an annotation
+router.put('/:annotationId', async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
+    const { annotationId } = req.params;
+    const userId = req.userId;
+    const updateData = req.body;
+
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(annotationId)) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
-        details: errors.array(),
-        code: 'VALIDATION_ERROR'
+        error: 'Invalid annotation ID format'
       });
     }
 
-    const { annotationId } = req.params;
-    const updates = req.body;
-
-    // Find annotation owned by user
+    // Find annotation and check ownership
     const annotation = await Annotation.findOne({
-      where: {
-        id: annotationId,
-        user_id: req.userId,
-        is_deleted: false
-      }
+      _id: annotationId,
+      user_id: userId,
+      is_deleted: false
     });
 
     if (!annotation) {
       return res.status(404).json({
         success: false,
-        error: 'Annotation not found or access denied',
-        code: 'ANNOTATION_NOT_FOUND'
+        error: 'Annotation not found or access denied'
       });
     }
 
     // Update allowed fields
-    const allowedUpdates = ['content', 'color', 'attachments', 'tags', 'style_properties'];
-    for (const field of allowedUpdates) {
-      if (updates[field] !== undefined) {
-        annotation[field] = updates[field];
-      }
-    }
+    const allowedFields = [
+      'coordinates', 'content', 'selected_text', 'color', 
+      'style_properties', 'metadata', 'tags'
+    ];
 
-    await annotation.save();
+    allowedFields.forEach(field => {
+      if (updateData[field] !== undefined) {
+        annotation[field] = updateData[field];
+      }
+    });
+
+    const updatedAnnotation = await annotation.save();
 
     res.json({
       success: true,
-      message: 'Annotation updated successfully',
-      data: annotation.getPublicData()
+      data: updatedAnnotation.getPublicData()
     });
 
   } catch (error) {
     console.error('Update annotation error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to update annotation',
-      code: 'UPDATE_ANNOTATION_ERROR'
+      error: 'Failed to update annotation'
     });
   }
 });
 
-/**
- * @route   DELETE /api/annotations/:annotationId
- * @desc    Delete an annotation (soft delete)
- * @access  Private
- */
-router.delete('/:annotationId', [
-  param('annotationId').isUUID().withMessage('Valid annotation ID is required')
-], async (req, res) => {
+// Delete an annotation
+router.delete('/:annotationId', async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
+    const { annotationId } = req.params;
+    const userId = req.userId;
+
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(annotationId)) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
-        details: errors.array(),
-        code: 'VALIDATION_ERROR'
+        error: 'Invalid annotation ID format'
       });
     }
 
-    const { annotationId } = req.params;
-
-    // Find annotation owned by user
+    // Find annotation and check ownership
     const annotation = await Annotation.findOne({
-      where: {
-        id: annotationId,
-        user_id: req.userId,
-        is_deleted: false
-      }
+      _id: annotationId,
+      user_id: userId,
+      is_deleted: false
     });
 
     if (!annotation) {
       return res.status(404).json({
         success: false,
-        error: 'Annotation not found or access denied',
-        code: 'ANNOTATION_NOT_FOUND'
+        error: 'Annotation not found or access denied'
       });
     }
 
@@ -408,155 +272,125 @@ router.delete('/:annotationId', [
     console.error('Delete annotation error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to delete annotation',
-      code: 'DELETE_ANNOTATION_ERROR'
+      error: 'Failed to delete annotation'
     });
   }
 });
 
-/**
- * @route   POST /api/annotations/bulk
- * @desc    Create multiple annotations at once
- * @access  Private
- */
-router.post('/bulk', [
-  body('file_id').isUUID().withMessage('Valid file ID is required'),
-  body('annotations').isArray({ min: 1 }).withMessage('Annotations array is required with at least one item')
-], async (req, res) => {
+// Create bulk annotations
+router.post('/bulk', async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
+    const userId = req.userId;
+    const { file_id, annotations } = req.body;
+
+    // Validate input
+    if (!file_id || !annotations || !Array.isArray(annotations)) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
-        details: errors.array(),
-        code: 'VALIDATION_ERROR'
+        error: 'Missing required fields: file_id, annotations array'
       });
     }
 
-    const { file_id, annotations } = req.body;
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(file_id)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid file ID format'
+      });
+    }
 
-    // Verify user owns this file
+    // Check if user has access to this file
     const file = await File.findOne({
-      where: {
-        id: file_id,
-        user_id: req.userId
-      }
+      _id: file_id,
+      user_id: userId
     });
 
     if (!file) {
       return res.status(404).json({
         success: false,
-        error: 'File not found or access denied',
-        code: 'FILE_NOT_FOUND'
+        error: 'File not found or access denied'
       });
     }
 
-    // Validate and prepare annotations for bulk creation
-    const annotationsToCreate = annotations.map(annotation => ({
-      user_id: req.userId,
-      file_id,
-      page_number: annotation.page_number,
-      annotation_type: annotation.annotation_type,
-      coordinates: annotation.coordinates,
-      content: annotation.content,
-      selected_text: annotation.selected_text,
-      color: annotation.color || '#ffff00',
-      attachments: annotation.attachments || [],
-      style_properties: annotation.style_properties || {},
-      ai_generated: annotation.ai_generated || false,
-      ai_metadata: annotation.ai_metadata,
-      is_text_selection: annotation.is_text_selection || false,
-      coordinate_version: annotation.coordinate_version || '2.0',
-      metadata: annotation.metadata || {},
-      tags: annotation.tags || []
-    }));
+    // Create all annotations
+    const createdAnnotations = [];
+    for (const annotationData of annotations) {
+      const annotation = new Annotation({
+        user_id: userId,
+        file_id: file_id,
+        page_number: annotationData.page_number,
+        annotation_type: annotationData.annotation_type,
+        coordinates: annotationData.coordinates,
+        content: annotationData.content,
+        selected_text: annotationData.selected_text,
+        color: annotationData.color,
+        style_properties: annotationData.style_properties,
+        ai_generated: annotationData.ai_generated || false,
+        ai_metadata: annotationData.ai_metadata,
+        is_text_selection: annotationData.is_text_selection || false,
+        coordinate_version: annotationData.coordinate_version || '2.0',
+        metadata: annotationData.metadata,
+        tags: annotationData.tags || []
+      });
 
-    // Create annotations in bulk
-    const createdAnnotations = await Annotation.bulkCreate(annotationsToCreate);
+      const savedAnnotation = await annotation.save();
+      createdAnnotations.push(savedAnnotation.getPublicData());
+    }
 
-    res.status(201).json({
+    res.json({
       success: true,
-      message: `${createdAnnotations.length} annotations created successfully`,
-      data: {
-        created_count: createdAnnotations.length,
-        annotations: createdAnnotations.map(annotation => annotation.getPublicData())
-      }
+      data: createdAnnotations
     });
 
   } catch (error) {
-    console.error('Bulk create annotations error:', error);
+    console.error('Create bulk annotations error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to create annotations',
-      code: 'BULK_CREATE_ANNOTATIONS_ERROR'
+      error: 'Failed to create bulk annotations'
     });
   }
 });
 
-/**
- * @route   GET /api/annotations/search
- * @desc    Search annotations by content or tags
- * @access  Private
- */
+// Search annotations
 router.get('/search', async (req, res) => {
   try {
-    const { q, file_id, type, page_number, limit = 50, offset = 0 } = req.query;
+    const userId = req.userId;
+    const { q: searchTerm, file_id, annotation_type } = req.query;
 
-    if (!q) {
+    if (!searchTerm) {
       return res.status(400).json({
         success: false,
-        error: 'Search query is required',
-        code: 'SEARCH_QUERY_REQUIRED'
+        error: 'Search term is required'
       });
     }
 
-    // Build search conditions
-    const whereConditions = {
-      user_id: req.userId,
-      is_deleted: false
-    };
-
-    if (file_id) whereConditions.file_id = file_id;
-    if (type) whereConditions.annotation_type = type;
-    if (page_number) whereConditions.page_number = parseInt(page_number);
-
-    // Search in content, selected_text, and tags using MongoDB syntax
-    if (q) {
-      whereConditions.$or = [
-        { content: { $regex: q, $options: 'i' } },
-        { selected_text: { $regex: q, $options: 'i' } },
-        { tags: { $in: [q] } }
-      ];
+    const options = {};
+    if (file_id) {
+      if (!mongoose.Types.ObjectId.isValid(file_id)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid file ID format'
+        });
+      }
+      options.file_id = file_id;
     }
 
-    const annotations = await Annotation.find(whereConditions)
-      .populate('file_id', 'display_name original_name')
-      .sort({ created_at: -1 })
-      .limit(parseInt(limit))
-      .skip(parseInt(offset));
-    
-    const total = await Annotation.countDocuments(whereConditions);
+    if (annotation_type) {
+      options.annotation_type = annotation_type;
+    }
+
+    const annotations = await Annotation.searchAnnotations(userId, searchTerm, options);
 
     res.json({
       success: true,
-      data: {
-        annotations: annotations.map(annotation => ({
-          ...annotation.getPublicData(),
-          file: annotation.file_id
-        })),
-        total_count: total,
-        limit: parseInt(limit),
-        offset: parseInt(offset)
-      }
+      data: annotations.map(annotation => annotation.getPublicData())
     });
 
   } catch (error) {
     console.error('Search annotations error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to search annotations',
-      code: 'SEARCH_ANNOTATIONS_ERROR'
+      error: 'Failed to search annotations'
     });
   }
 });

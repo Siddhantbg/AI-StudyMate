@@ -7,8 +7,12 @@ const mongoConfig = {
     uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/forest_pdf_viewer_dev',
     options: {
       maxPoolSize: 10, // Maintain up to 10 socket connections
-      serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
+      serverSelectionTimeoutMS: 10000, // Keep trying to send operations for 10 seconds
       socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
+      connectTimeoutMS: 10000, // Give up initial connection after 10 seconds
+      heartbeatFrequencyMS: 10000, // Check server status every 10 seconds
+      retryWrites: true, // Retry writes if they fail
+      retryReads: true, // Retry reads if they fail
     }
   },
   test: {
@@ -56,6 +60,23 @@ const connectToMongoDB = async () => {
     return mongoose.connection;
   } catch (error) {
     console.error('❌ MongoDB connection error:', error.message);
+    
+    // Try to provide helpful error messages
+    if (error.message.includes('ECONNREFUSED')) {
+      console.error('💡 Suggestion: Check if MongoDB Atlas cluster is running and accessible');
+      console.error('💡 Suggestion: Verify your IP address is whitelisted in MongoDB Atlas');
+      console.error('💡 Suggestion: Check your internet connection');
+    }
+    
+    if (error.message.includes('Authentication failed')) {
+      console.error('💡 Suggestion: Verify your MongoDB username and password');
+    }
+    
+    if (error.message.includes('querySrv ECONNREFUSED')) {
+      console.error('💡 Suggestion: DNS resolution failed - check your MongoDB connection string');
+      console.error('💡 Suggestion: Try using a different network or VPN');
+    }
+    
     throw error;
   }
 };

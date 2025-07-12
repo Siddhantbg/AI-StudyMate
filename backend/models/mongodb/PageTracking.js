@@ -21,8 +21,8 @@ const PageTrackingSchema = new mongoose.Schema({
   },
   session_id: {
     type: String,
-    required: true,
-    index: true // Links to reading session
+    required: true
+    // Links to reading session
   },
   time_spent: {
     type: Number,

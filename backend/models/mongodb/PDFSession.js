@@ -15,9 +15,7 @@ const PDFSessionSchema = new mongoose.Schema({
   },
   session_id: {
     type: String,
-    required: true,
-    unique: true,
-    index: true
+    required: true
   },
   session_name: {
     type: String,

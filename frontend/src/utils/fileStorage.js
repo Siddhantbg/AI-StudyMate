@@ -1,7 +1,7 @@
 // File storage utility using IndexedDB for PDF file management
 
 const DB_NAME = 'ForestPDFViewer';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'uploadedFiles';
 
 // Initialize IndexedDB
@@ -81,9 +81,12 @@ export const getSavedFiles = async () => {
     
     // Check if object store exists
     if (!db.objectStoreNames.contains(STORE_NAME)) {
-      console.log('Object store not found, recreating database...');
-      await recreateDatabase();
-      return [];
+      console.log('Object store not found, reinitializing...');
+      db.close();
+      const newDb = await initDB();
+      if (!newDb.objectStoreNames.contains(STORE_NAME)) {
+        return [];
+      }
     }
     
     const transaction = db.transaction([STORE_NAME], 'readonly');
@@ -106,12 +109,7 @@ export const getSavedFiles = async () => {
     });
   } catch (error) {
     console.error('Error getting saved files:', error);
-    // Try to recreate database if it's corrupted
-    try {
-      await recreateDatabase();
-    } catch (recreateError) {
-      console.error('Error recreating database:', recreateError);
-    }
+    // Return empty array instead of recreating database
     return [];
   }
 };
@@ -191,7 +189,7 @@ export const formatFileSize = (bytes) => {
 // Get files from server
 export const getServerFiles = async () => {
   try {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('access_token');
     
     if (!token) {
       console.log('No authentication token found');
@@ -249,7 +247,18 @@ export const getAllFiles = async () => {
 // Load file from server
 export const loadServerFile = async (uploadedFileName) => {
   try {
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/files/${uploadedFileName}`);
+    const token = localStorage.getItem('access_token');
+    
+    if (!token) {
+      throw new Error('No authentication token found');
+    }
+    
+    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/files/${uploadedFileName}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
     
     if (!response.ok) {
       throw new Error(`Failed to load file: ${response.statusText}`);

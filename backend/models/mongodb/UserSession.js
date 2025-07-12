@@ -51,8 +51,7 @@ const UserSessionSchema = new mongoose.Schema({
   },
   expires_at: {
     type: Date,
-    required: true,
-    index: true
+    required: true
   },
   is_active: {
     type: Boolean,

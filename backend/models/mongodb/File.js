@@ -27,7 +27,16 @@ const FileSchema = new mongoose.Schema({
   },
   file_path: {
     type: String,
-    required: true // Relative path from uploads directory
+    required: false // Legacy field - will be deprecated when using MongoDB storage
+  },
+  file_data: {
+    type: Buffer, // Binary data stored in MongoDB
+    required: false // Will be required when migrating away from file system
+  },
+  storage_type: {
+    type: String,
+    enum: ['filesystem', 'mongodb'],
+    default: 'mongodb' // New files will be stored in MongoDB by default
   },
   mime_type: {
     type: String,
@@ -168,6 +177,32 @@ FileSchema.methods.updateProcessingStatus = async function(status, extractedText
     this.extracted_text = extractedText;
   }
   return await this.save();
+};
+
+// MongoDB storage methods
+FileSchema.methods.storeFileData = async function(buffer) {
+  this.file_data = buffer;
+  this.storage_type = 'mongodb';
+  this.file_path = null; // Clear legacy file path
+  return await this.save();
+};
+
+FileSchema.methods.getFileData = function() {
+  if (this.storage_type === 'mongodb' && this.file_data) {
+    return this.file_data;
+  }
+  return null;
+};
+
+FileSchema.methods.hasFileData = function() {
+  return this.storage_type === 'mongodb' && this.file_data && this.file_data.length > 0;
+};
+
+FileSchema.methods.getFileSize = function() {
+  if (this.storage_type === 'mongodb' && this.file_data) {
+    return this.file_data.length;
+  }
+  return this.file_size;
 };
 
 FileSchema.methods.getPublicData = function() {

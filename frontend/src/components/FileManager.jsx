@@ -17,15 +17,22 @@ const FileManager = ({ onFileLoad }) => {
   const [savedFiles, setSavedFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedFileId, setSelectedFileId] = useState(null);
-  const { makeAuthenticatedRequest } = useAuth();
+  const { makeAuthenticatedRequest, user, isAuthenticated } = useAuth();
   const { showToast } = useToast();
 
-  // Load saved files on component mount
+  // Load saved files on component mount and when authentication changes
   useEffect(() => {
-    loadSavedFiles();
-  }, []);
+    if (isAuthenticated) {
+      loadSavedFiles();
+    }
+  }, [isAuthenticated]);
 
   const loadSavedFiles = async () => {
+    // Prevent multiple simultaneous requests
+    if (loading) {
+      return;
+    }
+    
     try {
       setLoading(true);
       
@@ -130,7 +137,7 @@ const FileManager = ({ onFileLoad }) => {
       
       // Call the callback to load the file in the main app
       if (onFileLoad) {
-        onFileLoad(file, uploadedFileName, metadata);
+        onFileLoad(file, uploadedFileName, metadata, fileInfo?.id || fileId);
       }
       
       console.log('File loaded successfully:', metadata.fileName);

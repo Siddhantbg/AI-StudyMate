@@ -19,13 +19,15 @@ console.log('PDF.js version:', pdfjs.version);
 console.log('PDF.js worker configured:', pdfjs.GlobalWorkerOptions.workerSrc);
 
 const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFileName, fileId }) => {
-  console.log('=== PDFViewer Debug Info ===');
-  console.log('File received:', file);
-  console.log('File type:', typeof file);
-  console.log('File constructor:', file?.constructor?.name);
-  console.log('Uploaded filename:', uploadedFileName);
-  console.log('Current page:', currentPage);
-  console.log('FileId for database:', fileId);
+  useEffect(() => {
+    console.log('=== PDFViewer Debug Info ===');
+    console.log('File received:', file);
+    console.log('File type:', typeof file);
+    console.log('File constructor:', file?.constructor?.name);
+    console.log('Uploaded filename:', uploadedFileName);
+    console.log('Current page:', currentPage);
+    console.log('FileId for database:', fileId);
+  }, [file, uploadedFileName, currentPage, fileId]);
 
   // Toast notifications and APIs
   const { showToast } = useToast();
@@ -423,7 +425,7 @@ const PDFViewer = ({ file, currentPage, onPageChange, onLoadSuccess, uploadedFil
       }
       
       // Convert database format to component format
-      return result.data.annotations.map(annotation => ({
+      return result.data.map(annotation => ({
         id: annotation.id,
         type: annotation.annotation_type,
         coordinates: annotation.coordinates,

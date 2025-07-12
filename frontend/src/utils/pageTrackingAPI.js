@@ -1,4 +1,7 @@
 // API utilities for page tracking and reading progress
+// DISABLED - All page tracking endpoints have been removed from backend
+// This file is kept for reference but all functions are disabled
+
 import { useAuth } from '../contexts/AuthContext';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;

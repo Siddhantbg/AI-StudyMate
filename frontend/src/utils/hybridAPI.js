@@ -1,4 +1,5 @@
 // Hybrid API utility that works with both server and offline storage
+import React, { useMemo } from 'react';
 import offlineStorage from './offlineStorage';
 import { useConnectionStatus } from './connectionStatus';
 import { useAuth } from '../contexts/AuthContext';
@@ -109,33 +110,9 @@ class HybridAPI {
 
   // Enhanced page tracking with offline support
   async trackTimeSpent(fileId, pageNumber, timeSpent) {
-    const { canSaveToServer } = this.getConnectionStatus();
+    // Page tracking endpoints disabled - save to offline storage only
+    console.log('Page tracking disabled, saving offline:', { fileId, pageNumber, timeSpent });
     
-    if (canSaveToServer) {
-      try {
-        const response = await this.makeAuthenticatedRequest('/api/page-tracking/track', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            file_id: fileId,
-            page_number: pageNumber,
-            time_spent: timeSpent
-          })
-        });
-        
-        const result = await response.json();
-        if (result.success) {
-          // Update offline storage too
-          await this.offlineStorage.savePageTracking(fileId, pageNumber, timeSpent, {
-            synced: true
-          });
-          return result;
-        }
-      } catch (error) {
-        console.warn('Server time tracking failed, saving offline:', error);
-      }
-    }
-
     // Fallback to offline storage
     return await this.offlineStorage.savePageTracking(fileId, pageNumber, timeSpent, {
       synced: false
@@ -143,29 +120,9 @@ class HybridAPI {
   }
 
   async getPageTrackingData(fileId, pageNumber) {
-    const { canSaveToServer } = this.getConnectionStatus();
+    // Page tracking endpoints disabled - use offline storage only
+    console.log('Page tracking data disabled, using offline:', { fileId, pageNumber });
     
-    if (canSaveToServer) {
-      try {
-        const response = await this.makeAuthenticatedRequest(
-          `/api/page-tracking/file/${fileId}/page/${pageNumber}`
-        );
-        const result = await response.json();
-        
-        if (result.success) {
-          // Update offline storage
-          await this.offlineStorage.savePageTracking(fileId, pageNumber, 
-            result.data.total_time_spent || 0, {
-              ...result.data,
-              synced: true
-            });
-          return result.data;
-        }
-      } catch (error) {
-        console.warn('Server tracking data load failed, using offline:', error);
-      }
-    }
-
     // Fallback to offline storage
     const offlineData = await this.offlineStorage.loadPageTracking(fileId, pageNumber);
     return {
@@ -175,60 +132,17 @@ class HybridAPI {
   }
 
   async getFileProgress(fileId) {
-    const { canSaveToServer } = this.getConnectionStatus();
+    // Page tracking endpoints disabled - use offline storage only
+    console.log('File progress tracking disabled, using offline:', { fileId });
     
-    if (canSaveToServer) {
-      try {
-        const response = await this.makeAuthenticatedRequest(`/api/page-tracking/file/${fileId}`);
-        const result = await response.json();
-        
-        if (result.success) {
-          // Update offline storage
-          await this.offlineStorage.saveFileProgress(fileId, {
-            ...result.data,
-            synced: true
-          });
-          return result.data;
-        }
-      } catch (error) {
-        console.warn('Server file progress load failed, using offline:', error);
-      }
-    }
-
     // Fallback to offline storage
     return await this.offlineStorage.loadFileProgress(fileId);
   }
 
   async trackPage(fileId, pageNumber, data = {}) {
-    const { canSaveToServer } = this.getConnectionStatus();
+    // Page tracking endpoints disabled - use offline storage only
+    console.log('Page tracking disabled, saving offline:', { fileId, pageNumber, data });
     
-    if (canSaveToServer) {
-      try {
-        const response = await this.makeAuthenticatedRequest('/api/page-tracking/track', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            file_id: fileId,
-            page_number: pageNumber,
-            ...data
-          })
-        });
-        
-        const result = await response.json();
-        if (result.success) {
-          // Update offline storage
-          await this.offlineStorage.saveFileProgress(fileId, {
-            lastReadPage: pageNumber,
-            lastUpdated: new Date().toISOString(),
-            synced: true
-          });
-          return result;
-        }
-      } catch (error) {
-        console.warn('Server page tracking failed, saving offline:', error);
-      }
-    }
-
     // Fallback to offline storage
     await this.offlineStorage.saveFileProgress(fileId, {
       lastReadPage: pageNumber,
@@ -297,14 +211,16 @@ export const useHybridAPI = () => {
   const connectionStatus = useConnectionStatus();
   const { showToast } = useToast();
   
-  const api = new HybridAPI();
-  
-  // Inject dependencies
-  api.getConnectionStatus = () => connectionStatus;
-  api.makeAuthenticatedRequest = makeAuthenticatedRequest;
-  api.showToast = showToast;
+  return useMemo(() => {
+    const api = new HybridAPI();
+    
+    // Inject dependencies
+    api.getConnectionStatus = () => connectionStatus;
+    api.makeAuthenticatedRequest = makeAuthenticatedRequest;
+    api.showToast = showToast;
 
-  return api;
+    return api;
+  }, [makeAuthenticatedRequest, connectionStatus, showToast]);
 };
 
 export default HybridAPI;

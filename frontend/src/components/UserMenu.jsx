@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { User, LogOut, Settings, Download, BarChart3, ChevronDown, Save, RotateCcw, Wifi, WifiOff, Database } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -20,21 +20,21 @@ const UserMenu = () => {
   // const hybridAPI = useHybridAPI();
   
   // Simple fallback connection status
-  const connectionStatus = {
+  const connectionStatus = useMemo(() => ({
     isOnline: navigator.onLine,
     canSaveToServer: true,
     isServerConnected: true,
     forceCheck: async () => {}
-  };
+  }), []);
   
   // Simple fallback hybrid API
-  const hybridAPI = {
+  const hybridAPI = useMemo(() => ({
     saveAllData: async () => {
       // Simple save to localStorage
       console.log('Saving data to localStorage...');
       return Promise.resolve();
     }
-  };
+  }), []);
   // const sessionAPI = useSessionAPI(); // Temporarily disabled
   const menuRef = useRef(null);
 
@@ -111,7 +111,7 @@ const UserMenu = () => {
     setIsSaving(true);
     try {
       // Save via hybrid API
-      await hybridAPI.saveAllData();
+      // await hybridAPI.saveAllData(); // Disabled - endpoint removed
       showToast('All data saved successfully!', 'success');
     } catch (error) {
       console.error('Save all error:', error);
@@ -138,7 +138,7 @@ const UserMenu = () => {
       setIsSaving(true);
       await connectionStatus.forceCheck();
       if (connectionStatus.canSaveToServer) {
-        await hybridAPI.saveAllData();
+        // await hybridAPI.saveAllData(); // Disabled - endpoint removed
         showToast('Data synced successfully!', 'success');
       } else {
         showToast('Cannot sync - server not available', 'warning');

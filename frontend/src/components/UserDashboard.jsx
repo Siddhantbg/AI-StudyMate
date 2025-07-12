@@ -31,6 +31,11 @@ const UserDashboard = ({ isOpen, onClose }) => {
   }, [isOpen]);
 
   const loadDashboardData = async () => {
+    // Prevent multiple simultaneous requests
+    if (loading) {
+      return;
+    }
+    
     try {
       setLoading(true);
       

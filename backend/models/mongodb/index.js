@@ -28,6 +28,8 @@ const createIndexes = async () => {
     console.log('🔧 Creating database indexes...');
     
     // Ensure all models are compiled and indexes are created
+    // Note: Mongoose automatically creates indexes when models are first used
+    // This manual creation is optional but ensures indexes exist immediately
     await Promise.all([
       User.createIndexes(),
       File.createIndexes(),
@@ -41,7 +43,8 @@ const createIndexes = async () => {
     console.log('✅ Database indexes created successfully');
   } catch (error) {
     console.error('❌ Error creating indexes:', error);
-    throw error;
+    // Don't throw error - let the app continue even if index creation fails
+    console.log('⚠️  App will continue without manual index creation');
   }
 };
 

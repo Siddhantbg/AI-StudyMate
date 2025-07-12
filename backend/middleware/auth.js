@@ -122,8 +122,16 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
-    // Find and validate session
-    const session = await UserSession.findByToken(token);
+    // Find and validate session with timeout
+    console.log('🔍 Looking up session for token...');
+    const sessionPromise = UserSession.findByToken(token);
+    const sessionTimeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Session lookup timeout')), 5000);
+    });
+    
+    const session = await Promise.race([sessionPromise, sessionTimeout]);
+    console.log('📋 Session found:', session ? 'Yes' : 'No');
+    
     if (!session) {
       return res.status(401).json({
         success: false,
@@ -134,6 +142,7 @@ const authenticateToken = async (req, res, next) => {
 
     // Check if session is expired
     if (session.isExpired()) {
+      console.log('⏰ Session expired, logging out...');
       await session.logout();
       return res.status(401).json({
         success: false,
@@ -142,8 +151,15 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
-    // Update session activity
-    await session.updateActivity();
+    // Update session activity with timeout
+    console.log('📈 Updating session activity...');
+    const updatePromise = session.updateActivity();
+    const updateTimeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Session update timeout')), 3000);
+    });
+    
+    await Promise.race([updatePromise, updateTimeout]);
+    console.log('✅ Session activity updated');
 
     // Attach user and session to request
     req.user = user;

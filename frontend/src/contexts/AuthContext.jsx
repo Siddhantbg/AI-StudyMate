@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useMemo, useCallback } from 'react';
 
 const AuthContext = createContext();
 
@@ -54,7 +54,7 @@ export const AuthProvider = ({ children }) => {
   }, [API_BASE_URL]);
 
   // Login function
-  const login = async (email, password) => {
+  const login = useCallback(async (email, password) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
@@ -79,10 +79,10 @@ export const AuthProvider = ({ children }) => {
       console.error('Login error:', error);
       return { success: false, error: 'Network error. Please try again.' };
     }
-  };
+  }, [API_BASE_URL]);
 
   // Register function
-  const register = async (firstName, lastName, email, password) => {
+  const register = useCallback(async (firstName, lastName, email, password) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
@@ -112,10 +112,10 @@ export const AuthProvider = ({ children }) => {
       console.error('Registration error:', error);
       return { success: false, error: 'Network error. Please try again.' };
     }
-  };
+  }, [API_BASE_URL]);
 
   // Logout function
-  const logout = async () => {
+  const logout = useCallback(async () => {
     const accessToken = localStorage.getItem('access_token');
     
     // Try to logout on server to invalidate session
@@ -142,10 +142,10 @@ export const AuthProvider = ({ children }) => {
     
     // Clear any cached file data
     localStorage.removeItem('cached_files');
-  };
+  }, []);
 
   // Refresh token function
-  const refreshToken = async () => {
+  const refreshToken = useCallback(async () => {
     const refreshTokenValue = localStorage.getItem('refresh_token');
     if (!refreshTokenValue) {
       logout();
@@ -175,42 +175,92 @@ export const AuthProvider = ({ children }) => {
       logout();
       return false;
     }
-  };
+  }, [logout]);
 
   // Make authenticated API request with automatic token refresh
-  const makeAuthenticatedRequest = async (url, options = {}) => {
+  const makeAuthenticatedRequest = useCallback(async (url, options = {}) => {
     const currentToken = localStorage.getItem('access_token');
     
     if (!currentToken) {
       throw new Error('No authentication token available');
     }
 
-    const requestOptions = {
-      ...options,
-      headers: {
-        ...options.headers,
-        'Authorization': `Bearer ${currentToken}`,
-      },
+    // Create abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 60000); // 60 second timeout for uploads
+
+    // Prepare headers - avoid Content-Type for FormData uploads
+    const headers = {
+      'Authorization': `Bearer ${currentToken}`,
     };
-
-    let response = await fetch(url, requestOptions);
-
-    // If token expired, try to refresh
-    if (response.status === 401) {
-      const refreshSuccess = await refreshToken();
-      if (refreshSuccess) {
-        const newToken = localStorage.getItem('access_token');
-        requestOptions.headers['Authorization'] = `Bearer ${newToken}`;
-        response = await fetch(url, requestOptions);
-      } else {
-        throw new Error('Authentication failed');
-      }
+    
+    // Only add other headers if not FormData (which needs browser to set Content-Type)
+    if (options.headers && !(options.body instanceof FormData)) {
+      Object.assign(headers, options.headers);
     }
 
-    return response;
-  };
+    const requestOptions = {
+      ...options,
+      headers,
+      signal: controller.signal
+    };
 
-  const value = {
+    try {
+      console.log('Making authenticated request to:', url);
+      let response = await fetch(url, requestOptions);
+      clearTimeout(timeoutId);
+
+      console.log('Response status:', response.status);
+
+      // If token expired, try to refresh
+      if (response.status === 401) {
+        console.log('Token expired, attempting refresh...');
+        const refreshSuccess = await refreshToken();
+        if (refreshSuccess) {
+          const newToken = localStorage.getItem('access_token');
+          
+          // Prepare retry headers properly
+          const retryHeaders = {
+            'Authorization': `Bearer ${newToken}`,
+          };
+          
+          // Only add other headers if not FormData
+          if (options.headers && !(options.body instanceof FormData)) {
+            Object.assign(retryHeaders, options.headers);
+          }
+          
+          // Create new timeout for retry
+          const retryController = new AbortController();
+          const retryTimeoutId = setTimeout(() => retryController.abort(), 60000);
+          
+          const retryOptions = {
+            ...options,
+            headers: retryHeaders,
+            signal: retryController.signal
+          };
+          
+          response = await fetch(url, retryOptions);
+          clearTimeout(retryTimeoutId);
+          console.log('Retry response status:', response.status);
+        } else {
+          throw new Error('Authentication failed - unable to refresh token');
+        }
+      }
+
+      return response;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('Request timeout - please try again');
+      }
+      console.error('Request failed:', error);
+      throw error;
+    }
+  }, [refreshToken]);
+
+  const value = useMemo(() => ({
     user,
     token,
     loading,
@@ -220,7 +270,7 @@ export const AuthProvider = ({ children }) => {
     refreshToken,
     makeAuthenticatedRequest,
     isAuthenticated: !!token && !!user,
-  };
+  }), [user, token, loading, login, register, logout, refreshToken, makeAuthenticatedRequest]);
 
   return (
     <AuthContext.Provider value={value}>
